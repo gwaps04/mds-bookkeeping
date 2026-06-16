@@ -16,3 +16,5 @@ export default async function RootPage() {
     redirect("/login");
   }
 }
+
+// Force Vercel to recognize public repository
