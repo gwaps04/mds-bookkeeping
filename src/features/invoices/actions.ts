@@ -5,56 +5,59 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function createInvoice(formData: FormData) {
-  const clientName = formData.get("client_name") as string;
-  const dueDate = formData.get("due_date") as string;
-  const description = formData.get("description") as string;
-  const quantity = parseInt(formData.get("quantity") as string);
-  const unitPrice = parseFloat(formData.get("unit_price") as string);
-  
-  const totalPrice = quantity * unitPrice;
-
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return { error: "Unauthorized" };
+  if (!user) throw new Error("Unauthorized");
 
+  // Get the user's business ID
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id")
     .eq("id", user.id)
     .single();
 
-  if (!profile?.business_id) return { error: "No active business found." };
+  const business_id = profile?.business_id;
+  
+  // Extract form data
+  const client_name = formData.get("client_name") as string;
+  const due_date = formData.get("due_date") as string;
+  const description = formData.get("description") as string;
+  const quantity = Number(formData.get("quantity") || 1);
+  const unit_price = Number(formData.get("unit_price") || 0);
 
-  // DANCE STEP 1: Insert the Parent Invoice
+  // Calculate the total math on the server so it can't be tampered with
+  const total_price = quantity * unit_price;
+
+  // 1. CREATE THE INVOICE HEADER
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
-    .insert({
-      business_id: profile.business_id,
-      client_name: clientName,
-      due_date: dueDate,
-      status: "draft",
-      total_amount: totalPrice
-    })
+    .insert([{
+      business_id,
+      client_name,
+      due_date,
+      status: 'sent', // Defaulting to 'sent' for the MVP
+      total_amount: total_price
+    }])
     .select("id")
     .single();
 
-  if (invoiceError) return { error: invoiceError.message };
+  if (invoiceError) throw new Error(invoiceError.message);
 
-  // DANCE STEP 2: Insert the Child Line Item using the Parent's ID
+  // 2. CREATE THE INVOICE LINE ITEM
   const { error: itemError } = await supabase
     .from("invoice_items")
-    .insert({
+    .insert([{
       invoice_id: invoice.id,
-      description: description,
-      quantity: quantity,
-      unit_price: unitPrice,
-      total_price: totalPrice
-    });
+      description,
+      quantity,
+      unit_price,
+      total_price
+    }]);
 
-  if (itemError) return { error: itemError.message };
+  if (itemError) throw new Error(itemError.message);
 
-  // DANCE STEP 3: Purge the cache
+  // 3. REFRESH CACHES
   revalidatePath("/invoices");
-  revalidatePath("/dashboard");
+  revalidatePath("/dashboard"); // This will wake up the "Unpaid Invoices" counter!
 }

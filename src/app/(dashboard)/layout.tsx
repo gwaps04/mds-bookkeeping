@@ -1,9 +1,10 @@
 // src/app/(dashboard)/layout.tsx
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "../../lib/supabase/server";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { logout } from "@/features/auth/actions";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { logout } from "../../features/auth/actions";
+import MobileNav from "../../components/MobileNav";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -53,6 +54,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
+      {/* DESKTOP SIDEBAR */}
       <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col">
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MDS Ledger</h1>
@@ -64,8 +66,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           
           {isSuperAdmin ? (
             <>
-              <Link href="/clients" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
-                Client Management
+              {/* --- FIXED SUPER ADMIN ROUTE --- */}
+              <Link href="/admin/businesses" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
+                Tenant Approvals
               </Link>
               <div className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-400 cursor-not-allowed">
                 System Logs
@@ -73,6 +76,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </>
           ) : (
             <>
+              <Link href="/clients" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
+                Client Directory
+              </Link>
+
               <Link href="/accounts" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
                 Chart of Accounts
               </Link>
@@ -82,8 +89,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <Link href="/invoices" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
                 Invoices
               </Link>
-              
-              {/* --- NEW: STAFF INVITATION GATE --- */}
+              <Link href="/income" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
+                Income & Sales
+              </Link>
+              <Link href="/expenses" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
+                Expenses
+              </Link>
+
+              {/* --- STAFF INVITATION GATE --- */}
               {isBusinessOwner && (
                 <Link href="/team" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors border-t border-neutral-200 mt-4 pt-4">
                   Team Management
@@ -102,9 +115,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
+      {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col min-w-0">
+        
+        {/* TOP HEADER */}
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0">
-          <div className="md:hidden font-bold text-lg">MDS Ledger</div>
+          
+          {/* MOBILE NAVIGATION TRIGGER */}
+          <div className="flex items-center gap-2 md:hidden">
+            <MobileNav role={profile?.role} />
+            <span className="font-bold text-lg tracking-tight">MDS Ledger</span>
+          </div>
+
           <div className="ml-auto flex items-center space-x-4">
             <span className="text-sm font-medium text-neutral-500 uppercase tracking-wider hidden sm:inline-block">
               {isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner'}
@@ -121,6 +143,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
+        {/* PAGE CONTENT */}
         <main className="flex-1 overflow-auto p-6 md:p-8">
           <div className="max-w-6xl mx-auto">
             {children}

@@ -5,36 +5,42 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function createAccount(formData: FormData) {
-  const name = formData.get("name") as string;
-  const category = formData.get("category") as string;
-
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return { error: "Unauthorized" };
+  if (!user) throw new Error("Unauthorized");
 
-  // 1. Fetch the user's business_id from their profile securely on the server
+  // Get the user's business ID
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id")
     .eq("id", user.id)
     .single();
 
-  if (!profile?.business_id) {
-    return { error: "No active business found." };
-  }
+  const business_id = profile?.business_id;
+  
+  // Extract form data
+  const name = formData.get("name") as string;
+  const type = formData.get("type") as string;
+  const category = formData.get("category") as string;
 
-  // 2. Insert the new account
+  // 1. INSERT THE NEW ACCOUNT
   const { error } = await supabase
     .from("accounts")
-    .insert({
-      business_id: profile.business_id,
-      name: name,
-      category: category,
-    });
+    .insert([{
+      business_id,
+      name,
+      type,
+      category
+    }]);
 
-  if (error) return { error: error.message };
+  if (error) {
+    console.error("Account creation failed:", error);
+    throw new Error(error.message);
+  }
 
-  // 3. Purge the cache so the UI updates instantly
-  revalidatePath("/accounts");
+  // 2. REFRESH CACHES
+  revalidatePath("/accounts"); // Refresh this page
+  revalidatePath("/expenses"); // Refresh the dropdowns on Expenses
+  revalidatePath("/income");   // Refresh the dropdowns on Income
 }
