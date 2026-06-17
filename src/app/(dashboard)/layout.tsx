@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { logout } from "../../features/auth/actions";
 import MobileNav from "../../components/MobileNav";
+import UserProfile from "../../components/UserProfile";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -12,9 +13,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect("/login");
 
+  // --- ADDED is_tax_registered TO THE DATABASE FETCH ---
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, businesses(status)")
+    .select("role, business_id, businesses(status, business_name, is_tax_registered)")
     .eq("id", user.id)
     .single();
 
@@ -25,12 +27,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
   
   const bizData = profile?.businesses as any;
   const businessStatus = Array.isArray(bizData) ? bizData[0]?.status : bizData?.status;
+  const rawBusinessName = Array.isArray(bizData) ? bizData[0]?.business_name : bizData?.business_name;
+  
+  // --- THE SMART TOGGLE ---
+  const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
+
+  // Prepare data for the User Profile Dropdown
+  const displayRole = isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner';
+  const displayBusinessName = isSuperAdmin ? 'MDS System Control' : (rawBusinessName || 'Pending Business');
 
   if (!isSuperAdmin && !profile?.business_id) {
     redirect("/onboarding");
   }
 
-  // The Waiting Room applies to both BOs and Staff (if the core business is pending)
+  // The Waiting Room
   if (!isSuperAdmin && businessStatus === 'pending') {
     return (
       <div className="min-h-screen bg-neutral-50 flex items-center justify-center p-4">
@@ -54,8 +64,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
-      {/* DESKTOP SIDEBAR */}
-      <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col">
+      {/* DESKTOP SIDEBAR - Added print:hidden here */}
+      <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col print:hidden">
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MDS Ledger</h1>
         </div>
@@ -66,7 +76,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
           
           {isSuperAdmin ? (
             <>
-              {/* --- FIXED SUPER ADMIN ROUTE --- */}
               <Link href="/admin/businesses" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
                 Tenant Approvals
               </Link>
@@ -96,55 +105,53 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 Expenses
               </Link>
 
-              {/* --- STAFF INVITATION GATE --- */}
-              {isBusinessOwner && (
-                <Link href="/team" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors border-t border-neutral-200 mt-4 pt-4">
-                  Team Management
+              {/* --- SMART TOGGLE: ONLY SHOWS IF TAX IS ENABLED --- */}
+              {isTaxEnabled && (
+                <Link href="/taxes" className="block px-3 py-2 text-sm font-medium rounded-md text-blue-700 bg-blue-50 border border-blue-100 mt-2 transition-colors">
+                  BIR Tax Tracker
                 </Link>
               )}
+
+              {/* --- OWNER EXCLUSIVE LINKS --- */}
+              {isBusinessOwner && (
+                <>
+                  <Link href="/team" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors border-t border-neutral-200 mt-4 pt-4">
+                    Team Management
+                  </Link>
+                  <Link href="/settings" className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 transition-colors">
+                    Business Settings
+                  </Link>
+                </>
+              )}
             </>
+            
           )}
         </nav>
-        
-        <div className="p-4 border-t border-neutral-200 shrink-0">
-          <form action={logout}>
-            <button type="submit" className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors">
-              Secure Sign Out
-            </button>
-          </form>
-        </div>
       </aside>
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col min-w-0">
         
-        {/* TOP HEADER */}
-        <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0">
+        {/* TOP HEADER - Added print:hidden here */}
+        <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0 print:hidden">
           
-          {/* MOBILE NAVIGATION TRIGGER */}
           <div className="flex items-center gap-2 md:hidden">
-            <MobileNav role={profile?.role} />
+            {/* PASS DOWN THE TAX BOOLEAN TO THE MOBILE MENU */}
+            <MobileNav role={profile?.role} isTaxEnabled={isTaxEnabled} />
             <span className="font-bold text-lg tracking-tight">MDS Ledger</span>
           </div>
 
           <div className="ml-auto flex items-center space-x-4">
-            <span className="text-sm font-medium text-neutral-500 uppercase tracking-wider hidden sm:inline-block">
-              {isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner'}
-            </span>
-            <div className="h-9 w-9 rounded-full bg-neutral-900 flex items-center justify-center font-semibold text-white shadow-sm">
-              {user.email?.charAt(0).toUpperCase()}
-            </div>
-            
-            <form action={logout} className="md:hidden">
-              <button type="submit" className="text-sm font-medium text-neutral-500 hover:text-red-600 transition-colors">
-                Sign Out
-              </button>
-            </form>
+            <UserProfile 
+              email={user.email || 'User'} 
+              roleLabel={displayRole} 
+              businessName={displayBusinessName} 
+            />
           </div>
         </header>
 
-        {/* PAGE CONTENT */}
-        <main className="flex-1 overflow-auto p-6 md:p-8">
+        {/* PAGE CONTENT - Added print padding and background resets here */}
+        <main className="flex-1 overflow-auto p-6 md:p-8 print:p-0 print:overflow-visible print:bg-white">
           <div className="max-w-6xl mx-auto">
             {children}
           </div>

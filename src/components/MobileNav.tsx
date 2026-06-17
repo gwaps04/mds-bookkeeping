@@ -7,7 +7,8 @@ import { Menu } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
-export default function MobileNav({ role }: { role: string }) {
+// Updated to accept the new isTaxEnabled prop
+export default function MobileNav({ role, isTaxEnabled }: { role?: string, isTaxEnabled?: boolean }) {
   const [open, setOpen] = useState(false);
   
   const isSuperAdmin = role === 'super_admin';
@@ -32,7 +33,6 @@ export default function MobileNav({ role }: { role: string }) {
           
           {isSuperAdmin ? (
             <>
-              {/* --- FIXED SUPER ADMIN ROUTE --- */}
               <Link href="/admin/businesses" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900">
                 Tenant Approvals
               </Link>
@@ -58,11 +58,23 @@ export default function MobileNav({ role }: { role: string }) {
               <Link href="/expenses" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900">
                 Expenses
               </Link>
+
+              {/* --- SMART TOGGLE FOR MOBILE --- */}
+              {isTaxEnabled && (
+                <Link href="/taxes" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-blue-700 bg-blue-50 border border-blue-100 mt-2">
+                  BIR Tax Tracker
+                </Link>
+              )}
               
               {isBusinessOwner && (
-                <Link href="/team" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 border-t border-neutral-200 mt-4 pt-4">
-                  Team Management
-                </Link>
+                <>
+                  <Link href="/team" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 border-t border-neutral-200 mt-4 pt-4">
+                    Team Management
+                  </Link>
+                  <Link href="/settings" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900">
+                    Business Settings
+                  </Link>
+                </>
               )}
             </>
           )}

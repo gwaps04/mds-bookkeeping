@@ -3,61 +3,64 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
-export async function createInvoice(formData: FormData) {
+export async function createOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) throw new Error("Unauthorized");
 
-  // Get the user's business ID
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id")
     .eq("id", user.id)
     .single();
 
-  const business_id = profile?.business_id;
-  
-  // Extract form data
-  const client_name = formData.get("client_name") as string;
-  const due_date = formData.get("due_date") as string;
-  const description = formData.get("description") as string;
-  const quantity = Number(formData.get("quantity") || 1);
-  const unit_price = Number(formData.get("unit_price") || 0);
+  const businessId = profile?.business_id;
 
-  // Calculate the total math on the server so it can't be tampered with
-  const total_price = quantity * unit_price;
+  // 1. EXTRACT DATA
+  const clientName = formData.get("client_name") as string;
+  const dueDate = formData.get("due_date") as string;
+  const itemsJson = formData.get("items") as string;
+  const items = JSON.parse(itemsJson);
 
-  // 1. CREATE THE INVOICE HEADER
+  if (!items || items.length === 0) throw new Error("Invoices must have at least one item.");
+
+  // 2. CALCULATE MASTER TOTAL
+  const totalAmount = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
+
+  // 3. INSERT MASTER INVOICE
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
     .insert([{
-      business_id,
-      client_name,
-      due_date,
-      status: 'sent', // Defaulting to 'sent' for the MVP
-      total_amount: total_price
+      business_id: businessId,
+      client_name: clientName,
+      due_date: dueDate,
+      status: "sent",
+      total_amount: totalAmount
     }])
     .select("id")
     .single();
 
   if (invoiceError) throw new Error(invoiceError.message);
 
-  // 2. CREATE THE INVOICE LINE ITEM
-  const { error: itemError } = await supabase
+  // 4. PREPARE & INSERT LINE ITEMS
+  const formattedItems = items.map((item: any) => ({
+    invoice_id: invoice.id,
+    description: item.description,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    total_price: item.quantity * item.unit_price
+  }));
+
+  const { error: itemsError } = await supabase
     .from("invoice_items")
-    .insert([{
-      invoice_id: invoice.id,
-      description,
-      quantity,
-      unit_price,
-      total_price
-    }]);
+    .insert(formattedItems);
 
-  if (itemError) throw new Error(itemError.message);
+  if (itemsError) throw new Error(itemsError.message);
 
-  // 3. REFRESH CACHES
+  // 5. REFRESH & REDIRECT TO THE PRINTABLE PDF
   revalidatePath("/invoices");
-  revalidatePath("/dashboard"); // This will wake up the "Unpaid Invoices" counter!
+  redirect(`/invoices/${invoice.id}`);
 }
