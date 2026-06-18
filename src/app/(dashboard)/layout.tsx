@@ -16,7 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // --- DATABASE FETCH ---
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, businesses(status, business_name, is_tax_registered)")
+    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered)")
     .eq("id", user.id)
     .single();
 
@@ -98,6 +98,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               email={user.email || 'User'} 
               roleLabel={displayRole} 
               businessName={displayBusinessName} 
+              fullName={profile?.full_name}
             />
           </div>
         </header>

@@ -1,61 +1,87 @@
 // src/components/UserProfile.tsx
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { logout } from "../features/auth/actions";
+import { LogOut, User } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { logout } from "@/features/auth/actions";
 
-export default function UserProfile({
-  email,
-  roleLabel,
-  businessName
-}: {
+interface UserProfileProps {
   email: string;
   roleLabel: string;
   businessName: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  fullName?: string; // Add the new full name prop
+}
 
-  // Automatically close the dropdown if the user clicks anywhere else on the screen
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+export default function UserProfile({ email, roleLabel, businessName, fullName }: UserProfileProps) {
+  
+  // Calculate initials for the avatar (e.g. "Juan Dela Cruz" -> "JD")
+  const getInitials = (name?: string, fallbackEmail?: string) => {
+    if (name) {
+      const parts = name.split(' ');
+      if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+      return name[0].toUpperCase();
+    }
+    return fallbackEmail ? fallbackEmail[0].toUpperCase() : 'U';
+  };
+
+  const displayName = fullName || email;
+  const initials = getInitials(fullName, email);
 
   return (
-    <div className="relative" ref={menuRef}>
-      {/* THE CLICKABLE BADGE */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center focus:outline-none transition-transform hover:scale-105 active:scale-95"
-      >
-        <div className="h-9 w-9 rounded-full bg-neutral-900 flex items-center justify-center font-semibold text-white shadow-sm ring-2 ring-transparent focus:ring-neutral-300">
-          {email.charAt(0).toUpperCase()}
-        </div>
-      </button>
-
-      {/* THE DROPDOWN MENU */}
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-neutral-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="p-4 border-b border-neutral-100 bg-neutral-50/50">
-            <p className="font-bold text-neutral-900 truncate">{businessName}</p>
-            <p className="text-xs font-bold text-blue-600 mt-1 uppercase tracking-wider">{roleLabel}</p>
-            <p className="text-sm text-neutral-500 mt-1 truncate">{email}</p>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className="relative h-10 w-auto flex items-center gap-3 pl-2 pr-4 rounded-full hover:bg-neutral-100 transition-colors">
+          <Avatar className="h-8 w-8 border border-neutral-200">
+            {/* You can add an actual image URL here later if you build profile picture uploads */}
+            <AvatarImage src="" alt={displayName} />
+            <AvatarFallback className="bg-neutral-900 text-white font-medium text-xs">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex flex-col items-start text-left hidden sm:flex">
+            <span className="text-sm font-semibold text-neutral-900 leading-none">{displayName}</span>
+            <span className="text-[10px] font-medium text-neutral-500 uppercase tracking-wider mt-1">{businessName}</span>
           </div>
-          <div className="p-2">
-            <form action={logout}>
-              <button type="submit" className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors font-medium">
-                Sign Out
-              </button>
-            </form>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56 mt-2" align="end" forceMount>
+        <DropdownMenuLabel className="font-normal">
+          <div className="flex flex-col space-y-1">
+            <p className="text-sm font-medium leading-none text-neutral-900">{displayName}</p>
+            <p className="text-xs leading-none text-neutral-500 mt-1">{email}</p>
           </div>
-        </div>
-      )}
-    </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <div className="px-2 py-1.5 text-xs font-medium text-neutral-500 flex justify-between items-center">
+            <span>Role</span>
+            <span className="bg-neutral-100 text-neutral-800 px-2 py-0.5 rounded uppercase tracking-wider text-[10px]">{roleLabel}</span>
+          </div>
+          <div className="px-2 py-1.5 text-xs font-medium text-neutral-500 flex justify-between items-center mb-1">
+            <span>Tenant</span>
+            <span className="text-neutral-900 truncate max-w-[120px]" title={businessName}>{businessName}</span>
+          </div>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <form action={logout}>
+          <DropdownMenuItem asChild>
+            <button type="submit" className="w-full text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer flex items-center">
+              <LogOut className="mr-2 h-4 w-4" />
+              <span>Log out</span>
+            </button>
+          </DropdownMenuItem>
+        </form>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
