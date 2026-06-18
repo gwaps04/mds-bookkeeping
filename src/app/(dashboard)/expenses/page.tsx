@@ -1,28 +1,31 @@
 // src/app/(dashboard)/expenses/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { createExpense } from "@/features/expenses/actions";
+import { createExpense, deleteExpense } from "@/features/expenses/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import Link from "next/link";
 
-export default async function ExpensesPage() {
+export default async function ExpensesPage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
+  const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Get Business Profile & Currency
+  // 1. Get Profile & Role
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, businesses(business_name, currency)")
+    .select("business_id, role, businesses(currency)")
     .eq("id", user?.id)
     .single();
 
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
+  const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // 2. Fetch Assets (Bank Accounts) & Expenses (Categories) 
+  // 2. Fetch Accounts (Assets = Pay From, Expenses = Category)
   const { data: accounts } = await supabase
     .from("accounts")
     .select("id, name, type")
@@ -33,8 +36,8 @@ export default async function ExpensesPage() {
   const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
   const expenseCategories = accounts?.filter(a => a.type === "expense") || [];
 
-  // 3. Fetch Historical Expenses with Vendor Names & Category Names attached
-  const { data: expenses } = await supabase
+  // 3. BUILD SEARCH & FILTER QUERY
+  let query = supabase
     .from("expenses")
     .select(`
       *,
@@ -44,6 +47,12 @@ export default async function ExpensesPage() {
     .eq("business_id", profile?.business_id)
     .order("date", { ascending: false });
 
+  if (params?.search) query = query.ilike("description", `%${params.search}%`);
+  if (params?.from) query = query.gte("date", params.from);
+  if (params?.to) query = query.lte("date", params.to);
+
+  const { data: expenseRecords } = await query;
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-PH', { style: 'currency', currency: currency }).format(amount);
   };
@@ -52,16 +61,17 @@ export default async function ExpensesPage() {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
         <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Expenses</h2>
-        <p className="text-neutral-500 mt-1">Track operational outgoings and vendor payments.</p>
+        <p className="text-neutral-500 mt-1">Record and manage business outflows, bills, and purchases.</p>
       </div>
 
       <div className="grid gap-8 md:grid-cols-3">
-        {/* LOG EXPENSE FORM */}
+        
+        {/* CREATE FORM */}
         <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200">
+          <Card className="shadow-sm border-neutral-200 sticky top-8">
             <CardHeader>
-              <CardTitle className="text-lg">Log Expense</CardTitle>
-              <CardDescription>Record a new purchase.</CardDescription>
+              <CardTitle className="text-lg">Record Expense</CardTitle>
+              <CardDescription>Log money leaving the business.</CardDescription>
             </CardHeader>
             <CardContent>
               <form action={async (formData) => {
@@ -70,8 +80,8 @@ export default async function ExpensesPage() {
               }} className="space-y-4">
                 
                 <div className="space-y-2">
-                  <Label htmlFor="vendor_name">Vendor / Merchant</Label>
-                  <Input id="vendor_name" name="vendor_name" placeholder="e.g. Meralco, Vercel" required />
+                  <Label htmlFor="vendor_name">Vendor / Payee</Label>
+                  <Input id="vendor_name" name="vendor_name" placeholder="e.g. Meralco, Office Warehouse" required />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -81,93 +91,130 @@ export default async function ExpensesPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="date">Date</Label>
-                    <Input id="date" name="date" type="date" required />
+                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required />
                   </div>
                 </div>
 
-                {/* DYNAMIC EXPENSE CATEGORY DROPDOWN */}
                 <div className="space-y-2">
                   <Label htmlFor="category_id">Expense Category</Label>
                   <Select name="category_id" required>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category..." />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select category..." /></SelectTrigger>
                     <SelectContent className="max-h-[300px]">
-                      {expenseCategories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                      ))}
+                      {expenseCategories.map((cat) => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* DYNAMIC PAID FROM DROPDOWN */}
                 <div className="space-y-2">
                   <Label htmlFor="account_id">Paid From (Bank / Cash)</Label>
                   <Select name="account_id" required>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select account..." />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
                     <SelectContent className="max-h-[300px]">
-                      {bankAccounts.map((acc) => (
-                        <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                      ))}
+                      {bankAccounts.map((acc) => <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* MULTI-LINE TEXTAREA FOR DESCRIPTION */}
                 <div className="space-y-2">
-                  <Label htmlFor="description">Description (Optional)</Label>
-                  <Textarea 
-                    id="description" 
-                    name="description" 
-                    placeholder="Provide details, reference numbers, or context for this expense..." 
-                    className="resize-none h-20"
-                  />
+                  <Label htmlFor="reference_number">Reference No. (Optional)</Label>
+                  <Input id="reference_number" name="reference_number" placeholder="e.g. Receipt No." />
                 </div>
 
-                <Button type="submit" className="w-full">Log Expense</Button>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Notes / Details</Label>
+                  <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-20" required />
+                </div>
+
+                <Button type="submit" className="w-full bg-neutral-900 hover:bg-neutral-800 text-white">Record Expense</Button>
               </form>
             </CardContent>
           </Card>
         </div>
 
-        {/* EXPENSES DATA TABLE */}
-        <div className="md:col-span-2">
-          {/* NOTICE: overflow-x-auto applied here for mobile responsiveness */}
+        {/* RIGHT COLUMN: FILTER & TABLE */}
+        <div className="md:col-span-2 space-y-4">
+          
+          {/* SEARCH & FILTER BAR */}
+          <Card className="shadow-sm border-neutral-200 bg-white">
+            <CardContent className="p-4">
+              <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
+                <div className="flex-1 w-full space-y-1">
+                  <Label className="text-xs text-neutral-500">Search Notes</Label>
+                  <Input name="search" placeholder="Search description..." defaultValue={params?.search} />
+                </div>
+                <div className="w-full md:w-36 space-y-1">
+                  <Label className="text-xs text-neutral-500">From Date</Label>
+                  <Input type="date" name="from" defaultValue={params?.from} />
+                </div>
+                <div className="w-full md:w-36 space-y-1">
+                  <Label className="text-xs text-neutral-500">To Date</Label>
+                  <Input type="date" name="to" defaultValue={params?.to} />
+                </div>
+                <div className="flex gap-2 w-full md:w-auto">
+                  <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
+                  {(params?.search || params?.from || params?.to) && (
+                    <Link href="/expenses"><Button variant="outline" className="text-neutral-500">Clear</Button></Link>
+                  )}
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* EXPENSES DATA TABLE */}
           <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-[600px]">
               <thead className="bg-neutral-50 border-b border-neutral-200">
                 <tr>
-                  <th className="px-6 py-4 font-medium text-neutral-900">Date</th>
-                  <th className="px-6 py-4 font-medium text-neutral-900">Vendor</th>
-                  <th className="px-6 py-4 font-medium text-neutral-900">Category</th>
-                  <th className="px-6 py-4 font-medium text-neutral-900 text-right">Amount</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900">Date</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900">Vendor & Notes</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900">Category</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900 text-right">Amount</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
-                {(!expenses || expenses.length === 0) ? (
+                {(!expenseRecords || expenseRecords.length === 0) ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-neutral-500">
-                      No expenses logged yet.
+                    <td colSpan={5} className="px-4 py-8 text-center text-neutral-500">
+                      No expense records found.
                     </td>
                   </tr>
                 ) : (
-                  (expenses as any[]).map((exp) => (
-                    <tr key={exp.id} className="hover:bg-neutral-50 transition-colors">
-                      <td className="px-6 py-4 text-neutral-500">
-                        {new Date(exp.date).toLocaleDateString()}
+                  (expenseRecords as any[]).map((exp) => (
+                    <tr key={exp.id} className="hover:bg-neutral-50 group transition-colors">
+                      <td className="px-4 py-4 text-neutral-500">{new Date(exp.date).toLocaleDateString()}</td>
+                      <td className="px-4 py-4">
+                        <p className="font-medium text-neutral-900">{exp.vendors?.name || 'Unknown Vendor'}</p>
+                        <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[200px]">{exp.description}</p>
                       </td>
-                      <td className="px-6 py-4 font-medium text-neutral-900">
-                        {exp.vendors?.name || 'Unknown Vendor'}
-                      </td>
-                      <td className="px-6 py-4 text-neutral-600">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-800">
+                      <td className="px-4 py-4 text-neutral-600">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 border border-neutral-200">
                           {exp.accounts?.name || 'Uncategorized'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-right font-medium text-red-600">
+                      <td className="px-4 py-4 text-right font-medium text-neutral-900">
                         -{formatCurrency(Number(exp.amount))}
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                          
+                          {/* EDIT (Available to Everyone) */}
+                          <Link href={`/expenses/${exp.id}/edit`}>
+                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
+                          </Link>
+
+                          {/* DELETE (Restricted to Owner) */}
+                          {isOwner && (
+                            <form action={async (formData) => {
+                              "use server";
+                              await deleteExpense(formData);
+                            }}>
+                              <input type="hidden" name="id" value={exp.id} />
+                              <Button type="submit" variant="destructive" size="sm" className="h-8 px-3 text-xs">Delete</Button>
+                            </form>
+                          )}
+
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -175,6 +222,7 @@ export default async function ExpensesPage() {
               </tbody>
             </table>
           </div>
+
         </div>
       </div>
     </div>
