@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
+import SubmitButton from "@/components/SubmitButton";
 
 export default async function IncomePage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
   // Resolve URL Search Parameters for filtering
@@ -151,7 +152,11 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
                   />
                 </div>
 
-                <Button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white">Record Income</Button>
+                <SubmitButton 
+  title="Record Income" 
+  loadingTitle="Saving Record..." 
+  className="w-full bg-green-600 hover:bg-green-700 text-white" 
+/>
               </form>
             </CardContent>
           </Card>

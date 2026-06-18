@@ -8,7 +8,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -19,12 +18,11 @@ interface UserProfileProps {
   email: string;
   roleLabel: string;
   businessName: string;
-  fullName?: string; // Add the new full name prop
+  fullName?: string;
 }
 
 export default function UserProfile({ email, roleLabel, businessName, fullName }: UserProfileProps) {
   
-  // Calculate initials for the avatar (e.g. "Juan Dela Cruz" -> "JD")
   const getInitials = (name?: string, fallbackEmail?: string) => {
     if (name) {
       const parts = name.split(' ');
@@ -42,7 +40,6 @@ export default function UserProfile({ email, roleLabel, businessName, fullName }
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-10 w-auto flex items-center gap-3 pl-2 pr-4 rounded-full hover:bg-neutral-100 transition-colors">
           <Avatar className="h-8 w-8 border border-neutral-200">
-            {/* You can add an actual image URL here later if you build profile picture uploads */}
             <AvatarImage src="" alt={displayName} />
             <AvatarFallback className="bg-neutral-900 text-white font-medium text-xs">
               {initials}
@@ -61,7 +58,9 @@ export default function UserProfile({ email, roleLabel, businessName, fullName }
             <p className="text-xs leading-none text-neutral-500 mt-1">{email}</p>
           </div>
         </DropdownMenuLabel>
+        
         <DropdownMenuSeparator />
+        
         <DropdownMenuGroup>
           <div className="px-2 py-1.5 text-xs font-medium text-neutral-500 flex justify-between items-center">
             <span>Role</span>
@@ -72,15 +71,22 @@ export default function UserProfile({ email, roleLabel, businessName, fullName }
             <span className="text-neutral-900 truncate max-w-[120px]" title={businessName}>{businessName}</span>
           </div>
         </DropdownMenuGroup>
+        
         <DropdownMenuSeparator />
-        <form action={logout}>
-          <DropdownMenuItem asChild>
-            <button type="submit" className="w-full text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer flex items-center">
+        
+        {/* THE FIX: A raw HTML form bypassing Radix UI event blockers */}
+        <div className="p-1">
+          <form action={logout}>
+            <button 
+              type="submit" 
+              className="flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-sm font-medium outline-none transition-colors hover:bg-red-50 text-red-600"
+            >
               <LogOut className="mr-2 h-4 w-4" />
               <span>Log out</span>
             </button>
-          </DropdownMenuItem>
-        </form>
+          </form>
+        </div>
+
       </DropdownMenuContent>
     </DropdownMenu>
   );
