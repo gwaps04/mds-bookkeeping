@@ -1,11 +1,12 @@
 // src/app/(dashboard)/accounts/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { deleteAccount } from "@/features/accounts/actions";
+import { createAccount, deleteAccount } from "@/features/accounts/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import SubmitButton from "@/components/SubmitButton";
 import Link from "next/link";
 
 export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string }> }) {
@@ -42,20 +43,73 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
 
       <div className="grid gap-8 md:grid-cols-3">
         
-        {/* ADD ACCOUNT FORM (Placeholder for future expansion) */}
+        {/* LEFT COLUMN: ADD ACCOUNT FORM (OWNERS ONLY) */}
         <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200 sticky top-8">
-            <CardHeader>
-              <CardTitle className="text-lg">Structural Controls</CardTitle>
-              <CardDescription>Accounts are automatically provisioned during onboarding.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-blue-50 border border-blue-100 rounded-md text-sm text-blue-800">
-                <span className="font-bold block mb-1">Data Integrity Note:</span>
-                Never delete an account that has historical transactions tied to it. Doing so will permanently unbalance your ledger. If an account is closed, rename it with "(Archived)" instead.
-              </div>
-            </CardContent>
-          </Card>
+          {isOwner ? (
+            <Card className="shadow-sm border-neutral-200 sticky top-8">
+              <CardHeader>
+                <CardTitle className="text-lg">Add New Account</CardTitle>
+                <CardDescription>Expand your financial ledger structure.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action={async (formData) => {
+                  "use server";
+                  await createAccount(formData);
+                }} className="space-y-4">
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Account Name</Label>
+                    <Input id="name" name="name" placeholder="e.g. BDO Checking, Marketing Exp" required />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="type">Financial Type</Label>
+                    <Select name="type" required>
+                      <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asset">Asset (Banks/Cash)</SelectItem>
+                        <SelectItem value="revenue">Revenue (Income)</SelectItem>
+                        <SelectItem value="expense">Expense (Outflows)</SelectItem>
+                        <SelectItem value="liability">Liability (Loans/Payables)</SelectItem>
+                        <SelectItem value="equity">Equity</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Sub-Category (Optional)</Label>
+                    <Input id="category" name="category" placeholder="e.g. Current Asset, Utility" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="account_number">Bank / Account No. (Optional)</Label>
+                    <Input id="account_number" name="account_number" placeholder="e.g. 1010, 0001-2345" />
+                  </div>
+
+                  <div className="pt-2">
+                    <SubmitButton 
+                      title="Create Account" 
+                      loadingTitle="Creating..." 
+                      className="w-full bg-blue-700 hover:bg-blue-800 text-white" 
+                    />
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="shadow-sm border-neutral-200 sticky top-8">
+              <CardHeader>
+                <CardTitle className="text-lg">Structural Controls</CardTitle>
+                <CardDescription>Account creation is restricted.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-blue-50 border border-blue-100 rounded-md text-sm text-blue-800">
+                  <span className="font-bold block mb-1">Access Restricted:</span>
+                  Only Business Owners have permission to modify the structural Chart of Accounts. Please contact your administrator to add new banks or categories.
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* RIGHT COLUMN: FILTERS & TABLE */}
