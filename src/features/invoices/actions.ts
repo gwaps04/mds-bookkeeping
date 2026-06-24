@@ -200,3 +200,71 @@ export async function deleteOfficialInvoice(formData: FormData) {
 
   revalidatePath("/invoices");
 }
+
+// ============================================================================
+// 4. RECORD INVOICE PAYMENT (THE A/R ENGINE)
+// ============================================================================
+export async function recordInvoicePayment(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
+  const businessId = profile?.business_id;
+
+  // 1. Extract Data
+  const invoiceId = formData.get("invoice_id") as string;
+  const amount = parseFloat(formData.get("amount") as string);
+  const date = formData.get("date") as string;
+  const accountId = formData.get("account_id") as string;
+  const reference = formData.get("reference") as string;
+  const clientName = formData.get("client_name") as string;
+
+  // 2. Auto-locate or create a Revenue Category for Invoices
+  let { data: revCategory } = await supabase.from("accounts").select("id").eq("business_id", businessId).eq("name", "Accounts Receivable / Invoices").single();
+  
+  if (!revCategory) {
+    const { data: newCat } = await supabase.from("accounts")
+      .insert([{ business_id: businessId, name: "Accounts Receivable / Invoices", type: "revenue" }])
+      .select("id").single();
+    revCategory = newCat;
+  }
+
+  // 3. INSERT THE INCOME RECORD
+  // By tagging it with invoice_id, it is permanently linked!
+  const { error: incomeError } = await supabase.from("income").insert([{
+    business_id: businessId,
+    invoice_id: invoiceId,
+    amount: amount,
+    date: date,
+    account_id: accountId,
+    category_id: revCategory?.id,
+    description: `Payment from ${clientName} for Invoice #${invoiceId.split('-')[0].toUpperCase()}`,
+    reference_number: reference,
+    created_by: user.id
+  }]);
+
+  if (incomeError) throw new Error(incomeError.message);
+
+  // 4. THE A/R RECALCULATOR: Check if fully paid!
+  const { data: invoice } = await supabase.from("invoices").select("total_amount").eq("id", invoiceId).single();
+  const { data: payments } = await supabase.from("income").select("amount").eq("invoice_id", invoiceId);
+  
+  const totalPaid = payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+  
+  // If the total paid equals or exceeds the invoice total, mark it completely PAID! Otherwise, Partially Paid.
+  const newStatus = totalPaid >= Number(invoice?.total_amount) ? "paid" : "partially_paid";
+
+  await supabase.from("invoices").update({ status: newStatus }).eq("id", invoiceId);
+
+  // 5. TRIGGER AUDIT LOG
+  await logSecurityEvent({
+    businessId: businessId as string, actorId: user.id, action: "RECORDED_INVOICE_PAYMENT", tableName: "invoices", recordId: invoiceId,
+    details: { amount_paid: amount, new_status: newStatus }
+  });
+
+  revalidatePath("/invoices");
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/income");
+  revalidatePath("/dashboard");
+}

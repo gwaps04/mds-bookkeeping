@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
+import SubmitButton from "@/components/SubmitButton";
 
 export default async function ExpensesPage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
   const params = await props.searchParams;
@@ -125,7 +126,11 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
                   <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-20" required />
                 </div>
 
-                <Button type="submit" className="w-full bg-neutral-900 hover:bg-neutral-800 text-white">Record Expense</Button>
+          <SubmitButton 
+  title="Record Expense" 
+  loadingTitle="Recording..." 
+  className="w-full bg-neutral-900 text-white hover:bg-neutral-800" 
+/>
               </form>
             </CardContent>
           </Card>

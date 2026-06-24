@@ -14,9 +14,23 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user?.id).single();
+  // 1. FETCH THE PROFILE + THE NEW BUSINESS SETTING
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("business_id, role, businesses(allow_staff_account_creation)")
+    .eq("id", user?.id)
+    .single();
+    
   const businessId = profile?.business_id;
-  const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+  const role = profile?.role;
+  const isOwner = role === 'business_owner' || role === 'super_admin';
+
+  // 2. SET UP THE DYNAMIC RBAC LOGIC
+  const businessData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
+  const allowAccountCreation = businessData?.allow_staff_account_creation ?? true;
+  
+  // The master toggle for account modification
+  const canCreateAccount = isOwner || (role === 'staff' && allowAccountCreation);
 
   // BUILD SEARCH & FILTER QUERY
   let query = supabase
@@ -43,9 +57,9 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
 
       <div className="grid gap-8 md:grid-cols-3">
         
-        {/* LEFT COLUMN: ADD ACCOUNT FORM (OWNERS ONLY) */}
+        {/* LEFT COLUMN: ADD ACCOUNT FORM (CONTROLLED BY DYNAMIC RBAC) */}
         <div className="md:col-span-1">
-          {isOwner ? (
+          {canCreateAccount ? (
             <Card className="shadow-sm border-neutral-200 sticky top-8">
               <CardHeader>
                 <CardTitle className="text-lg">Add New Account</CardTitle>
@@ -90,7 +104,7 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                     <SubmitButton 
                       title="Create Account" 
                       loadingTitle="Creating..." 
-                      className="w-full bg-blue-700 hover:bg-blue-800 text-white" 
+                      className="w-full bg-blue-600 text-white hover:bg-blue-700" 
                     />
                   </div>
                 </form>
@@ -180,11 +194,15 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                           <td className="px-4 py-4 text-center">
                             <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                               
-                              <Link href={`/accounts/${acc.id}/edit`}>
-                                <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
-                              </Link>
+                              {/* EDIT BUTTON (Visible to those who can create) */}
+                              {canCreateAccount && (
+                                <Link href={`/accounts/${acc.id}/edit`}>
+                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
+                                </Link>
+                              )}
 
-                              {isOwner && (
+                              {/* DELETE BUTTON (Visible to those who can create) */}
+                              {canCreateAccount && (
                                 <form action={async (formData) => {
                                   "use server";
                                   await deleteAccount(formData);

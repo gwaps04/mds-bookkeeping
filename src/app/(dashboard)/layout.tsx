@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { logout } from "../../features/auth/actions";
 import MobileNav from "../../components/MobileNav";
 import UserProfile from "../../components/UserProfile";
-import SideNav from "../../components/SideNav"; // <-- Import the new Desktop Nav!
+import SideNav from "../../components/SideNav";
+import Footer from "../../components/Footer"; // <-- 1. INJECTED FOOTER IMPORT
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -103,11 +104,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        {/* PAGE CONTENT */}
-        <main className="flex-1 overflow-auto p-6 md:p-8 print:p-0 print:overflow-visible print:bg-white">
-          <div className="max-w-6xl mx-auto">
+        {/* PAGE CONTENT & FOOTER WRAPPER */}
+        {/* 2. Changed to flex-col so the footer gets pushed to the bottom cleanly */}
+        <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white">
+          
+          {/* Main children area grows to fill space, pushing footer down */}
+          <div className="flex-1 p-6 md:p-8 w-full max-w-6xl mx-auto print:p-0">
             {children}
           </div>
+          
+          {/* 3. INJECTED FOOTER (Automatically renders on EVERY page!) */}
+          <div className="print:hidden">
+            <Footer />
+          </div>
+
         </main>
       </div>
     </div>

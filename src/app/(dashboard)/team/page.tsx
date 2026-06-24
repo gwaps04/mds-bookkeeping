@@ -1,11 +1,8 @@
 // src/app/(dashboard)/team/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { inviteStaff } from "@/features/team/actions";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
+import { ProvisionStaffForm, ResetPasswordButton } from "./TeamForms";
 
 export default async function TeamPage() {
   const supabase = await createClient();
@@ -32,7 +29,7 @@ export default async function TeamPage() {
     .eq("business_id", businessId)
     .order("created_at", { ascending: true });
 
-  // Check if limit is reached for the UI
+  // 3. UI LIMIT CHECK (Your brilliant logic!)
   const staffCount = teamMembers?.filter(m => m.role === 'staff').length || 0;
   const isLimitReached = staffCount >= 1;
 
@@ -59,31 +56,8 @@ export default async function TeamPage() {
                   <p className="mt-1">You are currently limited to 1 staff member. Please remove an existing member to add a new one.</p>
                 </div>
               ) : (
-                <form action={async (formData) => {
-                  "use server";
-                  await inviteStaff(formData);
-                }} className="space-y-4">
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="full_name">Employee Full Name</Label>
-                    <Input id="full_name" name="full_name" placeholder="e.g. Maria Santos" required />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email Address</Label>
-                    <Input id="email" name="email" type="email" placeholder="employee@company.com" required />
-                  </div>
-
-                  <div className="bg-blue-50 p-3 rounded-md border border-blue-100 mt-4">
-                    <p className="text-xs text-blue-800 font-medium">
-                      New accounts are automatically set to the "Staff" role with the temporary password: <span className="font-bold">StaffPassword123!</span>
-                    </p>
-                  </div>
-
-                  <Button type="submit" className="w-full bg-neutral-900 hover:bg-neutral-800 text-white mt-4">
-                    Provision Account
-                  </Button>
-                </form>
+                /* INJECT THE SMART FORM COMPONENT HERE */
+                <ProvisionStaffForm />
               )}
             </CardContent>
           </Card>
@@ -103,12 +77,13 @@ export default async function TeamPage() {
                       <th className="px-6 py-3 font-medium text-neutral-900">Name / Email</th>
                       <th className="px-6 py-3 font-medium text-neutral-900">Role</th>
                       <th className="px-6 py-3 font-medium text-neutral-900">Joined</th>
+                      <th className="px-6 py-3 font-medium text-neutral-900 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-200">
                     {(!teamMembers || teamMembers.length === 0) ? (
                       <tr>
-                        <td colSpan={3} className="px-6 py-8 text-center text-neutral-500">
+                        <td colSpan={4} className="px-6 py-8 text-center text-neutral-500">
                           No team members found.
                         </td>
                       </tr>
@@ -138,6 +113,14 @@ export default async function TeamPage() {
                           <td className="px-6 py-4 text-neutral-500 text-xs">
                             {new Date(member.created_at).toLocaleDateString()}
                           </td>
+                          
+                          {/* SECURE PASSWORD RESET BUTTON */}
+                          <td className="px-6 py-4 text-right">
+                            {member.role === 'staff' && (
+                              <ResetPasswordButton userId={member.id} email={member.email} />
+                            )}
+                          </td>
+
                         </tr>
                       ))
                     )}

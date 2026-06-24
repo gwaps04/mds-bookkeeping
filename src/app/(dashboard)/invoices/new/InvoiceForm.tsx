@@ -6,6 +6,7 @@ import { createOfficialInvoice } from "@/features/invoices/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import SubmitButton from "@/components/SubmitButton";
 
 export default function InvoiceForm({ customers }: { customers: any[] }) {
   // State to manage dynamic line items
@@ -39,9 +40,13 @@ export default function InvoiceForm({ customers }: { customers: any[] }) {
         
         <div className="space-y-2">
           <Label htmlFor="due_date">Payment Due Date</Label>
-          <Input id="due_date" name="due_date" type="date" required 
-            defaultValue={new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]} 
-          />
+          <Input 
+  id="due_date" 
+  name="due_date" 
+  type="date" 
+  defaultValue="" 
+  required 
+/>
         </div>
       </div>
 
@@ -108,9 +113,11 @@ export default function InvoiceForm({ customers }: { customers: any[] }) {
         </div>
       </div>
 
-      <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white py-6 text-lg font-medium shadow-md">
-        Save Invoice & Generate PDF
-      </Button>
+      <SubmitButton 
+  title="Save Invoice & Update PDF" 
+  loadingTitle="Saving & Generating PDF..." 
+  className="w-full bg-blue-600 hover:bg-blue-700 text-white text-lg py-6" 
+/>
     </form>
   );
 }

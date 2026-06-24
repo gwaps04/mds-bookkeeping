@@ -1,23 +1,36 @@
 // src/app/(dashboard)/dashboard/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Fetch the Profile and the attached Business Currency
+  // 1. Fetch the Profile, Role, and ALL Business Settings
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, businesses(currency)")
+    .select("role, business_id, businesses(currency, is_tax_registered, show_net_cash_to_staff, show_taxes_to_staff)")
     .eq("id", user?.id)
     .single();
 
   const businessId = profile?.business_id;
+  const role = profile?.role;
+  const isOwner = role === 'business_owner' || role === 'super_admin';
+
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
+  const isTaxEnabled = bizData?.is_tax_registered || false;
 
-  // 2. Fetch Live Data (Income, Expenses, AND Invoices)
+  // --- DYNAMIC DASHBOARD VISIBILITY CONTROLS ---
+  // Owners ALWAYS see Net Cash. Staff only see it if the toggle is true.
+  const canSeeNetCash = isOwner || bizData?.show_net_cash_to_staff !== false;
+  
+  // Owners see taxes if the tax module is enabled. Staff only see it if the module is enabled AND the toggle is true.
+  const canSeeTaxes = isTaxEnabled && (isOwner || bizData?.show_taxes_to_staff === true);
+
+
+  // 2. Fetch Live Data
   const { data: incomeData } = await supabase
     .from("income")
     .select("id, amount, date, description, customers(name)")
@@ -25,7 +38,7 @@ export default async function DashboardPage() {
 
   const { data: expenseData } = await supabase
     .from("expenses")
-    .select("id, amount, date, description, vendors(name)")
+    .select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)")
     .eq("business_id", businessId);
 
   const { data: invoiceData } = await supabase
@@ -37,6 +50,7 @@ export default async function DashboardPage() {
   let totalIncome = 0;
   let totalExpenses = 0;
   let transactionsThisMonth = 0;
+  let totalTaxesPaid = 0; 
   
   let unpaidInvoicesTotal = 0;
   let unpaidInvoicesCount = 0;
@@ -48,46 +62,33 @@ export default async function DashboardPage() {
   // Process Income
   (incomeData || []).forEach((inc) => {
     totalIncome += Number(inc.amount);
-    
     const tDate = new Date(inc.date);
-    if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) {
-      transactionsThisMonth++;
-    }
-
-    const customer = inc.customers as any; 
-
+    if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) transactionsThisMonth++;
     recentActivity.push({
-      id: inc.id,
-      type: "income",
-      amount: Number(inc.amount),
-      date: inc.date,
-      party: customer?.name || "Walk-in Customer",
+      id: inc.id, type: "income", amount: Number(inc.amount), date: inc.date,
+      party: (inc.customers as any)?.name || "Walk-in Customer",
       description: inc.description || "Cash Receipt"
     });
   });
 
-  // Process Expenses
+  // Process Expenses & Taxes
   (expenseData || []).forEach((exp) => {
-    totalExpenses += Number(exp.amount);
-    
+    const expenseAmount = Number(exp.amount);
+    totalExpenses += expenseAmount;
     const tDate = new Date(exp.date);
-    if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) {
-      transactionsThisMonth++;
-    }
-
-    const vendor = exp.vendors as any;
+    if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) transactionsThisMonth++;
+    
+    const category = exp.accounts as any;
+    if (category?.name && category.name.toLowerCase().includes("tax")) totalTaxesPaid += expenseAmount;
 
     recentActivity.push({
-      id: exp.id,
-      type: "expense",
-      amount: Number(exp.amount),
-      date: exp.date,
-      party: vendor?.name || "Unknown Vendor",
+      id: exp.id, type: "expense", amount: expenseAmount, date: exp.date,
+      party: (exp.vendors as any)?.name || "System Record",
       description: exp.description || "Business Expense"
     });
   });
 
-  // Process Invoices (Accounts Receivable)
+  // Process Invoices
   (invoiceData || []).forEach((inv) => {
     if (inv.status === 'sent') {
       unpaidInvoicesTotal += Number(inv.total_amount);
@@ -95,17 +96,23 @@ export default async function DashboardPage() {
     }
   });
 
-  // Calculate Net Cash Flow
   const totalCash = totalIncome - totalExpenses;
 
-  // Sort Recent Activity by Date (Newest First) and grab the top 5
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const top5Activity = recentActivity.slice(0, 5);
 
-  // 4. Native Browser Currency Formatting
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-PH', { style: 'currency', currency: currency }).format(amount);
   };
+
+  // Determine Grid Layout Based on Visible Cards
+  let visibleCards = 2; // Unpaid Invoices & Transactions are always visible
+  if (canSeeNetCash) visibleCards++;
+  if (canSeeTaxes) visibleCards++;
+
+  let gridClass = "grid gap-6 md:grid-cols-2 lg:grid-cols-2"; // Fallback for 2 cards
+  if (visibleCards === 3) gridClass = "grid gap-6 md:grid-cols-3";
+  if (visibleCards === 4) gridClass = "grid gap-6 md:grid-cols-2 lg:grid-cols-4";
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -114,39 +121,59 @@ export default async function DashboardPage() {
         <p className="text-neutral-500 mt-1">Welcome to your financial command center.</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* TOTAL CASH BALANCE */}
-        <Card className="shadow-sm border-neutral-200">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Net Cash Balance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-4xl font-bold ${totalCash < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
-              {formatCurrency(totalCash)}
-            </div>
-          </CardContent>
-        </Card>
+      <div className={gridClass}>
+        
+        {/* TOTAL CASH BALANCE (CONTROLLED BY RBAC) */}
+        {canSeeNetCash && (
+          <Card className="shadow-sm border-neutral-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Net Cash Balance</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-3xl lg:text-4xl font-bold ${totalCash < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
+                {formatCurrency(totalCash)}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* UNPAID INVOICES (LIVE) */}
+        {/* UNPAID INVOICES (ALWAYS VISIBLE) */}
         <Card className="shadow-sm border-neutral-200 bg-blue-50/50">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Unpaid Invoices</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-bold text-neutral-900">{formatCurrency(unpaidInvoicesTotal)}</div>
-            <p className="text-sm text-neutral-500 mt-1">{unpaidInvoicesCount} invoice(s) awaiting payment</p>
+            <div className="text-3xl lg:text-4xl font-bold text-neutral-900">{formatCurrency(unpaidInvoicesTotal)}</div>
+            <p className="text-xs lg:text-sm text-neutral-500 mt-1">{unpaidInvoicesCount} invoice(s) awaiting payment</p>
           </CardContent>
         </Card>
 
-        {/* TRANSACTIONS THIS MONTH */}
+        {/* TRANSACTIONS THIS MONTH (ALWAYS VISIBLE) */}
         <Card className="shadow-sm border-neutral-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Transactions This Month</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-bold text-neutral-900">{transactionsThisMonth}</div>
+            <div className="text-3xl lg:text-4xl font-bold text-neutral-900">{transactionsThisMonth}</div>
           </CardContent>
         </Card>
+
+        {/* EXECUTIVE TAX DASHBOARD (CONTROLLED BY RBAC) */}
+        {canSeeTaxes && (
+          <Link href="/taxes" className="block transition-transform hover:-translate-y-1 duration-200">
+            <Card className="shadow-sm border-orange-200 bg-orange-50/50 hover:bg-orange-50 cursor-pointer h-full">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                <CardTitle className="text-xs font-semibold text-orange-700 uppercase tracking-wider">Total Taxes Paid</CardTitle>
+                <span className="text-orange-400 text-xs">↗</span>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl lg:text-4xl font-bold text-neutral-900">{formatCurrency(totalTaxesPaid)}</div>
+                <p className="text-xs lg:text-sm text-orange-600/80 mt-1 hover:underline">View BIR Tracker</p>
+              </CardContent>
+            </Card>
+          </Link>
+        )}
+
       </div>
 
       {/* RECENT ACTIVITY FEED */}

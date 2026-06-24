@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SubmitButton from "@/components/SubmitButton";
 
 export default function EditInvoiceForm({ invoice, initialItems, customers }: { invoice: any, initialItems: any[], customers: any[] }) {
   const [items, setItems] = useState(initialItems.length > 0 ? initialItems : [{ description: "", quantity: 1, unit_price: 0 }]);
@@ -46,6 +47,7 @@ export default function EditInvoiceForm({ invoice, initialItems, customers }: { 
             <SelectContent>
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="sent">Sent</SelectItem>
+              <SelectItem value="partially_paid">Partially Paid</SelectItem>
               <SelectItem value="paid">Paid</SelectItem>
               <SelectItem value="overdue">Overdue</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
@@ -94,9 +96,11 @@ export default function EditInvoiceForm({ invoice, initialItems, customers }: { 
         </div>
       </div>
 
-      <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white py-6 text-lg font-medium shadow-md">
-        Save & Update PDF
-      </Button>
+      <SubmitButton 
+        title="Save Invoice & Update PDF" 
+        loadingTitle="Saving Invoice..." 
+        className="w-full bg-blue-700 hover:bg-blue-800 text-white py-6 text-lg font-medium shadow-md" 
+      />
     </form>
   );
 }
