@@ -8,10 +8,10 @@ export default async function TeamPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Get Business ID & Enforce Security
+  // 1. Get Business ID, Enforce Security, and Fetch Dynamic Limit
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, role")
+    .select("business_id, role, businesses(max_staff_limit)")
     .eq("id", user?.id)
     .single();
 
@@ -22,6 +22,13 @@ export default async function TeamPage() {
 
   const businessId = profile?.business_id;
 
+  // Resolve the dynamic limit set by the Super Admin
+  const maxLimit = Array.isArray(profile?.businesses) 
+    ? profile?.businesses[0]?.max_staff_limit 
+    : (profile?.businesses as any)?.max_staff_limit;
+  
+  const allowedLimit = maxLimit ?? 1; // Default to 1 if not set
+
   // 2. Fetch all active team members
   const { data: teamMembers } = await supabase
     .from("profiles")
@@ -29,15 +36,27 @@ export default async function TeamPage() {
     .eq("business_id", businessId)
     .order("created_at", { ascending: true });
 
-  // 3. UI LIMIT CHECK (Your brilliant logic!)
+  // 3. UI LIMIT CHECK
   const staffCount = teamMembers?.filter(m => m.role === 'staff').length || 0;
-  const isLimitReached = staffCount >= 1;
+  const hasRemainingQuota = staffCount < allowedLimit;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div>
-        <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Team Management</h2>
-        <p className="text-neutral-500 mt-1">Onboard staff and manage their access to your ledger.</p>
+      
+      {/* HEADER WITH DYNAMIC USAGE BADGE */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Team Management</h2>
+          <p className="text-neutral-500 mt-1">Onboard staff and manage their access to your ledger.</p>
+        </div>
+        
+        <div className={`px-4 py-2 rounded-full border text-sm font-bold shadow-sm ${
+          hasRemainingQuota 
+            ? 'bg-blue-50 border-blue-200 text-blue-700' 
+            : 'bg-amber-50 border-amber-200 text-amber-700'
+        }`}>
+          Usage: {staffCount} of {allowedLimit} Staff Slots Used
+        </div>
       </div>
 
       <div className="grid gap-8 md:grid-cols-3">
@@ -50,13 +69,12 @@ export default async function TeamPage() {
               <CardDescription>Instantly provision an account for a new employee.</CardDescription>
             </CardHeader>
             <CardContent>
-              {isLimitReached ? (
+              {!hasRemainingQuota ? (
                 <div className="bg-red-50 p-4 rounded-md border border-red-100 text-sm text-red-800 text-center">
-                  <p className="font-semibold">Plan Limit Reached</p>
-                  <p className="mt-1">You are currently limited to 1 staff member. Please remove an existing member to add a new one.</p>
+                  <p className="font-semibold text-red-900">Plan Limit Reached</p>
+                  <p className="mt-1">You are currently limited to {allowedLimit} staff member(s). Please remove an existing member or contact a Super Admin to upgrade.</p>
                 </div>
               ) : (
-                /* INJECT THE SMART FORM COMPONENT HERE */
                 <ProvisionStaffForm />
               )}
             </CardContent>
@@ -120,7 +138,6 @@ export default async function TeamPage() {
                               <ResetPasswordButton userId={member.id} email={member.email} />
                             )}
                           </td>
-
                         </tr>
                       ))
                     )}

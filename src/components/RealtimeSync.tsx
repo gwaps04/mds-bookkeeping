@@ -22,45 +22,66 @@ export default function RealtimeSync() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   
-  // Notification State
   const [notifications, setNotifications] = useState<LiveNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // =========================================================================
-  // PHASE 1: IDENTITY & TENANT RESOLUTION
+  // PHASE 1: ROBUST IDENTITY RESOLUTION
   // =========================================================================
   useEffect(() => {
     let isMounted = true;
+    
     async function resolveTenantIdentity() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+      console.log("🔍 [Realtime Sync] Phase 1: Checking user identity...");
+      
+      // Use getUser() instead of getSession() to guarantee we check the server state
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        console.error("❌ [Realtime Sync] No active user found. Cannot sync.", authError);
+        return;
+      }
+      
+      console.log(`✅ [Realtime Sync] User found: ${user.email}`);
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("business_id, role")
-        .eq("id", session.user.id)
+        .eq("id", user.id)
         .single();
 
-      if (isMounted && profile?.business_id) {
+      if (profileError || !profile) {
+        console.error("❌ [Realtime Sync] Failed to load user profile or business_id.", profileError);
+        return;
+      }
+      
+      console.log(`✅ [Realtime Sync] Profile matched to Business ID: ${profile.business_id}`);
+
+      if (isMounted && profile.business_id) {
         setBusinessId(profile.business_id);
         setUserRole(profile.role);
       }
     }
+    
     resolveTenantIdentity();
     return () => { isMounted = false; };
   }, [supabase]);
 
   // =========================================================================
-  // PHASE 2: TENANT-PARTITIONED WEBSOCKET TUNNEL & ROUTING LOGIC
+  // PHASE 2: TENANT-PARTITIONED WEBSOCKET TUNNEL
   // =========================================================================
   useEffect(() => {
-    if (!businessId) return;
+    if (!businessId) {
+      console.log("⏳ [Realtime Sync] Waiting for Business ID to be set...");
+      return;
+    }
 
+    console.log(`🔌 [Realtime Sync] Phase 2: Attempting connection to tenant ${businessId}...`);
     const channelName = `enterprise-sync-tenant-${businessId}`;
 
     const handleDatabaseChange = (payload: any) => {
-      console.log(`📡 [Realtime Sync] Payload received:`, payload);
+      console.log(`📡 [Realtime Sync] Database Payload Received!`, payload);
       
       const newRecord = payload.new;
       const eventType = payload.eventType; 
@@ -110,7 +131,6 @@ export default function RealtimeSync() {
         read: false
       };
 
-      // Ensure the notification panel automatically pops open when a new alert comes in!
       setNotifications((prev) => [newNotification, ...prev]);
       setIsOpen(true); 
     };
@@ -121,7 +141,14 @@ export default function RealtimeSync() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `business_id=eq.${businessId}` }, handleDatabaseChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'refund_requests', filter: `business_id=eq.${businessId}` }, handleDatabaseChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'businesses', filter: `id=eq.${businessId}` }, handleDatabaseChange)
-      .subscribe();
+      .subscribe((status, error) => {
+        console.log(`📡 [Realtime Sync] Websocket Status:`, status);
+        if (error) console.error(`❌ [Realtime Sync] Socket Error:`, error);
+        
+        if (status === 'SUBSCRIBED') {
+          console.log(`🟢 [Realtime Sync] Connected to Tenant Engine: ${businessId}`);
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [businessId, userRole, supabase]);
@@ -146,13 +173,11 @@ export default function RealtimeSync() {
   };
 
   // =========================================================================
-  // PHASE 4: THE FLOATING UI (BELL + SLIDE-OVER PANEL)
-  // NOTE: We removed the "return null" rule so the bell is ALWAYS visible!
+  // PHASE 4: THE FLOATING UI
   // =========================================================================
   return (
-    <div className="fixed bottom-8 right-8 z-[100] flex flex-col items-end">
+    <div className="fixed bottom-8 right-8 z-[100] flex flex-col items-end print:hidden">
       
-      {/* THE NOTIFICATION PANEL */}
       {isOpen && (
         <div className="mb-4 w-80 sm:w-96 bg-white border border-neutral-200 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-200">
           <div className="bg-neutral-900 text-white p-4 flex justify-between items-center">
@@ -203,7 +228,6 @@ export default function RealtimeSync() {
         </div>
       )}
 
-      {/* THE FLOATING BELL BUTTON (ALWAYS VISIBLE NOW) */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="relative flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-white shadow-xl hover:bg-neutral-800 hover:scale-105 active:scale-95 transition-all border border-neutral-700 focus:outline-none"
@@ -212,7 +236,6 @@ export default function RealtimeSync() {
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
         </svg>
         
-        {/* THE UNREAD BADGE */}
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 border-2 border-white text-[11px] font-bold text-white shadow-sm animate-in zoom-in">
             {unreadCount}

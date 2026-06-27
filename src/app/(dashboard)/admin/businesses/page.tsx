@@ -4,6 +4,7 @@ import { approveBusiness } from "@/features/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
+import ManageLimitButton from "./ManageLimitButton"; // <-- 1. IMPORT ADDED
 
 export default async function SuperAdminBusinessesPage() {
   const supabase = await createClient();
@@ -21,6 +22,7 @@ export default async function SuperAdminBusinessesPage() {
   }
 
   // 2. Fetch all SaaS Tenants (Businesses) and their Owners
+  // <-- 2. ADDED max_staff_limit TO THE QUERY -->
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
@@ -28,6 +30,7 @@ export default async function SuperAdminBusinessesPage() {
       business_name,
       status,
       created_at,
+      max_staff_limit,
       profiles ( full_name, email, role )
     `)
     .order("created_at", { ascending: false });
@@ -103,7 +106,15 @@ export default async function SuperAdminBusinessesPage() {
                               </Button>
                             </form>
                           ) : (
-                            <span className="text-xs font-medium text-neutral-400">Approved</span>
+                            // <-- 3. INJECTED LIMIT BUTTON HERE -->
+                            <div className="flex items-center justify-end gap-3">
+                              <span className="text-xs font-medium text-neutral-400">Approved</span>
+                              <ManageLimitButton 
+                                businessId={biz.id} 
+                                businessName={biz.business_name} 
+                                currentLimit={biz.max_staff_limit ?? 1} 
+                              />
+                            </div>
                           )}
                         </td>
                       </tr>

@@ -20,10 +20,8 @@ function generateSecurePassword() {
 export async function provisionStaffAccount(formData: FormData) {
   try {
     const email = formData.get("email") as string;
-    // Look for "name" (from new UI) or "full_name" (from old UI) to be safe
     const fullName = (formData.get("name") || formData.get("full_name")) as string; 
     
-    // Auto-generate the cryptographically secure password
     const tempPassword = generateSecurePassword(); 
 
     const supabase = await createClient();
@@ -31,10 +29,10 @@ export async function provisionStaffAccount(formData: FormData) {
 
     if (!user) return { error: "Unauthorized" };
 
-    // Verify the caller is actually a Business Owner
+    // Verify the caller is actually a Business Owner AND fetch the dynamic staff limit
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role, business_id")
+      .select("role, business_id, businesses(max_staff_limit)")
       .eq("id", user.id)
       .single();
 
@@ -42,15 +40,22 @@ export async function provisionStaffAccount(formData: FormData) {
       return { error: "Insufficient privileges." };
     }
 
-    // --- YOUR CUSTOM RULE: THE 1-STAFF LIMIT ---
+    // Resolve the dynamic limit (Defaults to 1 if not set)
+    const maxLimit = Array.isArray(profile?.businesses) 
+      ? profile?.businesses[0]?.max_staff_limit 
+      : (profile?.businesses as any)?.max_staff_limit;
+    const allowedLimit = maxLimit ?? 1;
+
+    // --- YOUR CUSTOM RULE: DYNAMIC STAFF LIMIT ENFORCEMENT ---
     const { count } = await supabase
       .from("profiles")
       .select("*", { count: 'exact', head: true })
       .eq("business_id", profile.business_id)
       .eq("role", "staff");
 
-    if (count && count >= 1) {
-      return { error: "Plan Limit Reached: You are only allowed 1 staff member. Please upgrade your plan." };
+    // If they have reached or exceeded their specific limit, block the creation
+    if (count !== null && count >= allowedLimit) {
+      return { error: `Plan Limit Reached: You are only allowed ${allowedLimit} staff member(s). Please contact a Super Admin to upgrade.` };
     }
 
     // 1. ESCALATION: Create the user in Auth
@@ -93,7 +98,6 @@ export async function provisionStaffAccount(formData: FormData) {
 
     revalidatePath("/team");
     
-    // RETURN SUCCESS TO THE FRONT-END SO IT CAN SHOW THE GREEN PASSWORD BOX!
     return { success: true, password: tempPassword, email: email };
 
   } catch (err: any) {
@@ -114,10 +118,8 @@ export async function resetStaffPassword(userId: string, email: string) {
     if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') return { error: "Forbidden" };
 
     const newPassword = generateSecurePassword();
-    
     const adminAuthClient = createAdminClient();
 
-    // RESET PASSWORD VIA ADMIN API
     const { error } = await adminAuthClient.auth.admin.updateUserById(userId, { password: newPassword });
     if (error) return { error: error.message };
 
