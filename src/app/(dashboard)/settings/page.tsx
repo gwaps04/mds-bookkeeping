@@ -10,7 +10,6 @@ export default async function SettingsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Fetch current business settings
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, business_id, businesses(*)")
@@ -19,17 +18,16 @@ export default async function SettingsPage() {
 
   const business = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
 
-  // The Bulletproof Server Action
   async function saveSettings(formData: FormData) {
     "use server";
     const supabaseServer = await createClient();
-    
     const bId = formData.get("business_id") as string;
     
     // Core Configuration
     const is_tax_registered = formData.get("is_tax_registered") === "on";
     const allow_staff_payment_logging = formData.get("allow_staff_payment_logging") === "on";
     const allow_staff_account_creation = formData.get("allow_staff_account_creation") === "on";
+    const allow_staff_refund_request = formData.get("allow_staff_refund_request") === "on"; // <-- NEW REFUND TOGGLE
     const tin_number = formData.get("tin_number") as string;
 
     // Dashboard Visibility Configuration
@@ -41,6 +39,7 @@ export default async function SettingsPage() {
       tax_id: tin_number,
       allow_staff_payment_logging,
       allow_staff_account_creation,
+      allow_staff_refund_request, // <-- SAVING NEW TOGGLE
       show_net_cash_to_staff,
       show_taxes_to_staff
     }).eq("id", bId);
@@ -64,42 +63,27 @@ export default async function SettingsPage() {
         <form action={saveSettings} className="space-y-6">
           <input type="hidden" name="business_id" value={business?.id || ''} />
 
-          {/* CARD 1: DASHBOARD VISIBILITY CONTROLS (NEW) */}
+          {/* CARD 1: DASHBOARD VISIBILITY CONTROLS */}
           <Card className="shadow-sm border-neutral-200">
             <CardHeader className="border-b border-neutral-100 pb-4 bg-neutral-50/50">
               <CardTitle className="text-lg">Dashboard Visibility Controls</CardTitle>
               <CardDescription>Control exactly which financial metrics your staff can see.</CardDescription>
             </CardHeader>
             <CardContent className="pt-6 space-y-4">
-              
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
-                <input 
-                  type="checkbox" 
-                  id="show_net_cash_to_staff" 
-                  name="show_net_cash_to_staff" 
-                  defaultChecked={business?.show_net_cash_to_staff ?? true}
-                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                />
+                <input type="checkbox" id="show_net_cash_to_staff" name="show_net_cash_to_staff" defaultChecked={business?.show_net_cash_to_staff ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="show_net_cash_to_staff" className="font-semibold text-neutral-900 cursor-pointer">Show Net Cash Balance to Staff</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, the main cash balance metric will be completely hidden from all staff accounts.</p>
                 </div>
               </div>
-
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
-                <input 
-                  type="checkbox" 
-                  id="show_taxes_to_staff" 
-                  name="show_taxes_to_staff" 
-                  defaultChecked={business?.show_taxes_to_staff ?? false}
-                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                />
+                <input type="checkbox" id="show_taxes_to_staff" name="show_taxes_to_staff" defaultChecked={business?.show_taxes_to_staff ?? false} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="show_taxes_to_staff" className="font-semibold text-neutral-900 cursor-pointer">Show Total Taxes Paid to Staff</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, the orange Executive Tax metric card will be hidden from staff. Owners will always see it.</p>
                 </div>
               </div>
-
             </CardContent>
           </Card>
 
@@ -112,27 +96,24 @@ export default async function SettingsPage() {
             <CardContent className="pt-6 space-y-4">
               
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
-                <input 
-                  type="checkbox" 
-                  id="allow_staff_payment_logging" 
-                  name="allow_staff_payment_logging" 
-                  defaultChecked={business?.allow_staff_payment_logging ?? true}
-                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                />
+                <input type="checkbox" id="allow_staff_payment_logging" name="allow_staff_payment_logging" defaultChecked={business?.allow_staff_payment_logging ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="allow_staff_payment_logging" className="font-semibold text-neutral-900 cursor-pointer">Allow Staff to Log Payments</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, only Business Owners and Admins can log receipts against invoices.</p>
                 </div>
               </div>
 
+              {/* --- NEW MODULE: REFUND REQUEST CONTROL --- */}
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
-                <input 
-                  type="checkbox" 
-                  id="allow_staff_account_creation" 
-                  name="allow_staff_account_creation" 
-                  defaultChecked={business?.allow_staff_account_creation ?? true}
-                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                />
+                <input type="checkbox" id="allow_staff_refund_request" name="allow_staff_refund_request" defaultChecked={business?.allow_staff_refund_request ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
+                <div>
+                  <Label htmlFor="allow_staff_refund_request" className="font-semibold text-neutral-900 cursor-pointer">Allow Staff to Request Refunds</Label>
+                  <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, only Business Owners can view the refund module and process overpayments.</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
+                <input type="checkbox" id="allow_staff_account_creation" name="allow_staff_account_creation" defaultChecked={business?.allow_staff_account_creation ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="allow_staff_account_creation" className="font-semibold text-neutral-900 cursor-pointer">Allow Staff to Modify Chart of Accounts</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, only Business Owners and Admins can add new banks or ledger categories.</p>
@@ -140,13 +121,7 @@ export default async function SettingsPage() {
               </div>
 
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
-                <input 
-                  type="checkbox" 
-                  id="is_tax_registered" 
-                  name="is_tax_registered" 
-                  defaultChecked={business?.is_tax_registered}
-                  className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
-                />
+                <input type="checkbox" id="is_tax_registered" name="is_tax_registered" defaultChecked={business?.is_tax_registered} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="is_tax_registered" className="font-semibold text-neutral-900 cursor-pointer">Enable BIR Tax Tracking</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Activate localized tax features to track percentage taxes and income tax filings.</p>
@@ -155,13 +130,7 @@ export default async function SettingsPage() {
 
               <div className="space-y-2 pt-2">
                 <Label htmlFor="tin_number">Tax Identification Number (TIN)</Label>
-                <Input 
-                  id="tin_number" 
-                  name="tin_number" 
-                  placeholder="e.g. 123-456-789-000" 
-                  defaultValue={business?.tax_id || ""}
-                  className="max-w-sm"
-                />
+                <Input id="tin_number" name="tin_number" placeholder="e.g. 123-456-789-000" defaultValue={business?.tax_id || ""} className="max-w-sm" />
                 <p className="text-[10px] text-neutral-400">Leave blank if you are not enabling tax tracking.</p>
               </div>
 

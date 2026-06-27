@@ -219,6 +219,9 @@ export async function recordInvoicePayment(formData: FormData) {
   const accountId = formData.get("account_id") as string;
   const reference = formData.get("reference") as string;
   const clientName = formData.get("client_name") as string;
+  
+  // EXTRACT CUSTOM DESCRIPTION
+  const customDescription = formData.get("description") as string;
 
   // 2. Auto-locate or create a Revenue Category for Invoices
   let { data: revCategory } = await supabase.from("accounts").select("id").eq("business_id", businessId).eq("name", "Accounts Receivable / Invoices").single();
@@ -230,8 +233,12 @@ export async function recordInvoicePayment(formData: FormData) {
     revCategory = newCat;
   }
 
-  // 3. INSERT THE INCOME RECORD
-  // By tagging it with invoice_id, it is permanently linked!
+  // 3. SMART FALLBACK DESCRIPTION
+  const finalDescription = customDescription && customDescription.trim() !== "" 
+    ? customDescription 
+    : `Payment from ${clientName} for Invoice #${invoiceId.split('-')[0].toUpperCase()}`;
+
+  // 4. INSERT THE INCOME RECORD
   const { error: incomeError } = await supabase.from("income").insert([{
     business_id: businessId,
     invoice_id: invoiceId,
@@ -239,14 +246,14 @@ export async function recordInvoicePayment(formData: FormData) {
     date: date,
     account_id: accountId,
     category_id: revCategory?.id,
-    description: `Payment from ${clientName} for Invoice #${invoiceId.split('-')[0].toUpperCase()}`,
+    description: finalDescription, // INJECTING THE CONTEXTUAL DESCRIPTION
     reference_number: reference,
     created_by: user.id
   }]);
 
   if (incomeError) throw new Error(incomeError.message);
 
-  // 4. THE A/R RECALCULATOR: Check if fully paid!
+  // 5. THE A/R RECALCULATOR: Check if fully paid!
   const { data: invoice } = await supabase.from("invoices").select("total_amount").eq("id", invoiceId).single();
   const { data: payments } = await supabase.from("income").select("amount").eq("invoice_id", invoiceId);
   
@@ -257,7 +264,7 @@ export async function recordInvoicePayment(formData: FormData) {
 
   await supabase.from("invoices").update({ status: newStatus }).eq("id", invoiceId);
 
-  // 5. TRIGGER AUDIT LOG
+  // 6. TRIGGER AUDIT LOG
   await logSecurityEvent({
     businessId: businessId as string, actorId: user.id, action: "RECORDED_INVOICE_PAYMENT", tableName: "invoices", recordId: invoiceId,
     details: { amount_paid: amount, new_status: newStatus }
