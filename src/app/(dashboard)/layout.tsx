@@ -6,7 +6,8 @@ import { logout } from "../../features/auth/actions";
 import MobileNav from "../../components/MobileNav";
 import UserProfile from "../../components/UserProfile";
 import SideNav from "../../components/SideNav";
-import Footer from "../../components/Footer"; // <-- 1. INJECTED FOOTER IMPORT
+import Footer from "../../components/Footer"; 
+import RealtimeSync from "../../components/RealtimeSync"; // <-- 1. IMPORTED THE ENGINE HERE
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -65,7 +66,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
-      
+     
+      {/* 2. INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
+      <RealtimeSync />
+
       {/* DESKTOP SIDEBAR */}
       <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col print:hidden">
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
@@ -105,7 +109,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </header>
 
         {/* PAGE CONTENT & FOOTER WRAPPER */}
-        {/* 2. Changed to flex-col so the footer gets pushed to the bottom cleanly */}
         <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white">
           
           {/* Main children area grows to fill space, pushing footer down */}
@@ -113,7 +116,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {children}
           </div>
           
-          {/* 3. INJECTED FOOTER (Automatically renders on EVERY page!) */}
+          {/* INJECTED FOOTER */}
           <div className="print:hidden">
             <Footer />
           </div>

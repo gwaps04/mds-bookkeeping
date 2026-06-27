@@ -10,7 +10,7 @@ type LiveNotification = {
   id: string;
   title: string;
   description: string;
-  href: string; // The URL to route to when clicked
+  href: string;
   time: Date;
   read: boolean;
 };
@@ -63,13 +63,12 @@ export default function RealtimeSync() {
       console.log(`📡 [Realtime Sync] Payload received:`, payload);
       
       const newRecord = payload.new;
-      const eventType = payload.eventType; // INSERT, UPDATE, DELETE
+      const eventType = payload.eventType; 
       
       let title = "System Update";
       let description = "A change occurred in the ledger.";
-      let href = "/dashboard"; // Default fallback route
+      let href = "/dashboard"; 
 
-      // --- DYNAMIC NOTIFICATION ROUTING LOGIC ---
       if (payload.table === 'invoices') {
         title = eventType === 'INSERT' ? "New Invoice Created" : "Invoice Updated";
         description = newRecord.client_name ? `Client: ${newRecord.client_name}` : `Invoice #${newRecord.id.split('-')[0].toUpperCase()}`;
@@ -78,7 +77,6 @@ export default function RealtimeSync() {
       else if (payload.table === 'income') {
         title = "Payment Received";
         description = `Amount: ₱${Number(newRecord.amount).toLocaleString('en-US')} logged.`;
-        // If it's linked to an invoice, route directly to that invoice!
         href = newRecord.invoice_id ? `/invoices/${newRecord.invoice_id}` : `/dashboard`;
       } 
       else if (payload.table === 'expenses') {
@@ -94,7 +92,7 @@ export default function RealtimeSync() {
         } else if (newRecord.status === 'approved') {
           title = "Refund Approved";
           description = `₱${Number(newRecord.amount).toLocaleString('en-US')} was deducted from cash.`;
-          href = `/invoices/${newRecord.invoice_id}`; // Route everyone to the invoice to see the change!
+          href = `/invoices/${newRecord.invoice_id}`;
         }
       } 
       else if (payload.table === 'businesses') {
@@ -103,7 +101,6 @@ export default function RealtimeSync() {
         href = `/settings`;
       }
 
-      // Add the new notification to the top of the list
       const newNotification: LiveNotification = {
         id: Math.random().toString(36).substr(2, 9),
         title,
@@ -113,7 +110,9 @@ export default function RealtimeSync() {
         read: false
       };
 
+      // Ensure the notification panel automatically pops open when a new alert comes in!
       setNotifications((prev) => [newNotification, ...prev]);
+      setIsOpen(true); 
     };
 
     const channel = supabase.channel(channelName)
@@ -133,13 +132,9 @@ export default function RealtimeSync() {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleNotificationClick = (notif: LiveNotification) => {
-    // 1. Mark as read locally
     setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
-    
-    // 2. Close the panel
     setIsOpen(false);
     
-    // 3. Route to the exact destination & force a soft-refresh of the data
     startTransition(() => {
       router.push(notif.href);
       router.refresh();
@@ -152,9 +147,10 @@ export default function RealtimeSync() {
 
   // =========================================================================
   // PHASE 4: THE FLOATING UI (BELL + SLIDE-OVER PANEL)
+  // NOTE: We removed the "return null" rule so the bell is ALWAYS visible!
   // =========================================================================
   return (
-    <div className="fixed bottom-8 right-8 z-50 flex flex-col items-end">
+    <div className="fixed bottom-8 right-8 z-[100] flex flex-col items-end">
       
       {/* THE NOTIFICATION PANEL */}
       {isOpen && (
@@ -207,10 +203,10 @@ export default function RealtimeSync() {
         </div>
       )}
 
-      {/* THE FLOATING BELL BUTTON */}
+      {/* THE FLOATING BELL BUTTON (ALWAYS VISIBLE NOW) */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-white shadow-xl hover:bg-neutral-800 hover:scale-105 active:scale-95 transition-all border border-neutral-700"
+        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-neutral-900 text-white shadow-xl hover:bg-neutral-800 hover:scale-105 active:scale-95 transition-all border border-neutral-700 focus:outline-none"
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
