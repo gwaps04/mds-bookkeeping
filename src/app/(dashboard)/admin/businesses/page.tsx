@@ -1,16 +1,16 @@
 // src/app/(dashboard)/admin/businesses/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { approveBusiness } from "@/features/admin/actions";
+import { approveBusiness } from "@/features/businesses/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
-import ManageLimitButton from "./ManageLimitButton"; // <-- 1. IMPORT ADDED
+import ManageLimitButton from "./ManageLimitButton"; 
+import ManageOrgLimitButton from "./ManageOrgLimitButton"; // <-- NEW IMPORT
 
 export default async function SuperAdminBusinessesPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Double-Lock: Kick out anyone who isn't the Super Admin
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
@@ -21,8 +21,7 @@ export default async function SuperAdminBusinessesPage() {
     redirect("/dashboard");
   }
 
-  // 2. Fetch all SaaS Tenants (Businesses) and their Owners
-  // <-- 2. ADDED max_staff_limit TO THE QUERY -->
+  // Fetch Businesses + Owner Profile Data (Added id and max_businesses_limit)
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
@@ -31,7 +30,7 @@ export default async function SuperAdminBusinessesPage() {
       status,
       created_at,
       max_staff_limit,
-      profiles ( full_name, email, role )
+      profiles ( id, full_name, email, role, max_businesses_limit )
     `)
     .order("created_at", { ascending: false });
 
@@ -68,8 +67,11 @@ export default async function SuperAdminBusinessesPage() {
                   </tr>
                 ) : (
                   businesses.map((biz) => {
-                    // Extract the specific profile marked as business_owner
-                    const owner = (biz.profiles as any[])?.find(p => p.role === 'business_owner');
+                    // Extract the owner profile
+                    const isArray = Array.isArray(biz.profiles);
+                    const owner = isArray 
+                      ? (biz.profiles as any[]).find(p => p.role === 'business_owner') 
+                      : biz.profiles;
 
                     return (
                       <tr key={biz.id} className="hover:bg-neutral-50 transition-colors">
@@ -77,9 +79,18 @@ export default async function SuperAdminBusinessesPage() {
                           {biz.business_name}
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex flex-col">
+                          <div className="flex flex-col items-start">
                             <span className="font-medium text-neutral-900">{owner?.full_name || 'Unknown'}</span>
                             <span className="text-xs text-neutral-500">{owner?.email}</span>
+                            
+                            {/* INJECTING THE ORGANIZATION LIMIT BUTTON HERE */}
+                            {owner?.id && (
+                              <ManageOrgLimitButton 
+                                ownerId={owner.id} 
+                                ownerName={owner.full_name || 'Unknown'} 
+                                currentLimit={owner.max_businesses_limit || 1} 
+                              />
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 text-neutral-500 text-xs">
@@ -106,7 +117,6 @@ export default async function SuperAdminBusinessesPage() {
                               </Button>
                             </form>
                           ) : (
-                            // <-- 3. INJECTED LIMIT BUTTON HERE -->
                             <div className="flex items-center justify-end gap-3">
                               <span className="text-xs font-medium text-neutral-400">Approved</span>
                               <ManageLimitButton 

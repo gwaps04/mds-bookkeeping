@@ -1,13 +1,13 @@
 // src/app/(dashboard)/layout.tsx
 import { redirect } from "next/navigation";
-import { createClient } from "../../lib/supabase/server";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { logout } from "../../features/auth/actions";
-import MobileNav from "../../components/MobileNav";
-import UserProfile from "../../components/UserProfile";
-import SideNav from "../../components/SideNav";
-import Footer from "../../components/Footer"; 
-import RealtimeSync from "../../components/RealtimeSync"; // <-- 1. IMPORTED THE ENGINE HERE
+import { createClient } from "@/lib/supabase/server";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { logout } from "@/features/auth/actions";
+import MobileNav from "@/components/MobileNav";
+import UserProfile from "@/components/UserProfile";
+import SideNav from "@/components/SideNav";
+import Footer from "@/components/Footer"; 
+import RealtimeSync from "@/components/RealtimeSync";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -33,6 +33,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   
   // --- THE SMART TOGGLE ---
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
+
+  // --- WORKSPACE FETCH (NEW!) ---
+  let ownedCompanies: any[] = [];
+  if (isBusinessOwner) {
+    const { data: companies } = await supabase
+      .from("businesses")
+      .select("id, business_name")
+      .eq("owner_id", user.id)
+      .order("created_at", { ascending: true });
+    
+    if (companies) ownedCompanies = companies;
+  }
 
   // Prepare data for the User Profile Dropdown
   const displayRole = isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner';
@@ -67,7 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="flex min-h-screen bg-neutral-50">
      
-      {/* 2. INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
+      {/* 1. INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
       <RealtimeSync />
 
       {/* DESKTOP SIDEBAR */}
@@ -77,7 +89,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
         
         {/* --- INJECT THE NEW INTELLIGENT SIDEBAR COMPONENT --- */}
-        <SideNav role={profile?.role} isTaxEnabled={isTaxEnabled} />
+        <SideNav 
+          role={profile?.role} 
+          isTaxEnabled={isTaxEnabled} 
+          companies={ownedCompanies} 
+          activeCompanyId={profile?.business_id} 
+        />
         
         <div className="p-4 border-t border-neutral-200 shrink-0">
           <form action={logout}>
