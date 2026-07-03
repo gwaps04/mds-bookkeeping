@@ -10,7 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
 
-export default async function ExpensesPage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
+// THE FIX: Added month and year to the expected searchParams Promise
+export default async function ExpensesPage(props: { 
+  searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
+}) {
   const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -37,7 +40,35 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
   const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
   const expenseCategories = accounts?.filter(a => a.type === "expense") || [];
 
-  // 3. BUILD SEARCH & FILTER QUERY
+  // ============================================================================
+  // 3. THE TEMPORAL BRIDGE (Timezone-Agnostic Boundary Calculator)
+  // ============================================================================
+  // Start with manual filters if the user typed them into the form
+  let startDate = params?.from || null;
+  let endDate = params?.to || null;
+
+  // If no manual filters, check if the Dashboard handed us a Month/Year
+  if (!startDate && !endDate && params?.year) {
+    const yearStr = params.year;
+    
+    if (params?.month && params.month !== 'all') {
+      // Create exact YYYY-MM-DD strings to avoid NodeJS Timezone drift
+      const monthStr = params.month.padStart(2, '0');
+      // Day 0 of the *next* month magically gives us the last day of the *current* month
+      const lastDay = new Date(Number(yearStr), Number(params.month), 0).getDate();
+      
+      startDate = `${yearStr}-${monthStr}-01`;
+      endDate = `${yearStr}-${monthStr}-${lastDay}T23:59:59.999`;
+    } else {
+      // "All Year" selected
+      startDate = `${yearStr}-01-01`;
+      endDate = `${yearStr}-12-31T23:59:59.999`;
+    }
+  }
+
+  // ============================================================================
+  // 4. BUILD DYNAMIC SEARCH & FILTER QUERY
+  // ============================================================================
   let query = supabase
     .from("expenses")
     .select(`
@@ -48,10 +79,12 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
     .eq("business_id", profile?.business_id)
     .order("date", { ascending: false });
 
+  // Inject the calculated boundaries into Postgres
   if (params?.search) query = query.ilike("description", `%${params.search}%`);
-  if (params?.from) query = query.gte("date", params.from);
-  if (params?.to) query = query.lte("date", params.to);
+  if (startDate) query = query.gte("date", startDate);
+  if (endDate) query = query.lte("date", endDate);
 
+  // Execute the query!
   const { data: expenseRecords } = await query;
 
   const formatCurrency = (amount: number) => {
@@ -126,11 +159,11 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
                   <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-20" required />
                 </div>
 
-          <SubmitButton 
-  title="Record Expense" 
-  loadingTitle="Recording..." 
-  className="w-full bg-neutral-900 text-white hover:bg-neutral-800" 
-/>
+                <SubmitButton 
+                  title="Record Expense" 
+                  loadingTitle="Recording..." 
+                  className="w-full bg-neutral-900 text-white hover:bg-neutral-800" 
+                />
               </form>
             </CardContent>
           </Card>
@@ -157,8 +190,12 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
                   <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
-                  {(params?.search || params?.from || params?.to) && (
-                    <Link href="/expenses"><Button variant="outline" className="text-neutral-500">Clear</Button></Link>
+                  
+                  {/* THE FIX: Updated to ensure Clear Button shows up for month/year URL parameters too! */}
+                  {(params?.search || params?.from || params?.to || params?.month || params?.year) && (
+                    <Link href="/expenses">
+                      <Button variant="outline" className="text-neutral-500">Clear Filter</Button>
+                    </Link>
                   )}
                 </div>
               </form>
@@ -181,7 +218,7 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
                 {(!expenseRecords || expenseRecords.length === 0) ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-neutral-500">
-                      No expense records found.
+                      No expense records found for this period.
                     </td>
                   </tr>
                 ) : (
@@ -203,12 +240,12 @@ export default async function ExpensesPage(props: { searchParams: Promise<{ sear
                       <td className="px-4 py-4 text-center">
                         <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                           
-                          {/* EDIT (Available to Everyone) */}
+                          {/* EDIT */}
                           <Link href={`/expenses/${exp.id}/edit`}>
                             <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
                           </Link>
 
-                          {/* DELETE (Restricted to Owner) */}
+                          {/* DELETE */}
                           {isOwner && (
                             <form action={async (formData) => {
                               "use server";
