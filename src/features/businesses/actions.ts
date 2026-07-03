@@ -6,11 +6,25 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 // ============================================================================
-// 1. PROVISION TENANT (For new Business Owners signing up)
+// 1. PROVISION TENANT (Upgraded with Address & Telemetry)
 // ============================================================================
 export async function provisionTenant(formData: FormData) {
   const businessName = formData.get("business_name") as string;
   const currency = formData.get("currency") as string;
+  const businessAddress = formData.get("business_address") as string; // NEW: Extracting the address
+  
+  // 1. Extract Telemetry Data
+  const industry = formData.get("industry") as string;
+  const employeeCount = formData.get("employee_count") as string;
+  const featuresRaw = formData.get("requested_features") as string;
+  
+  // 2. Safely parse the JSON array of checkboxes
+  let requestedFeatures: string[] = [];
+  try {
+    if (featuresRaw) requestedFeatures = JSON.parse(featuresRaw);
+  } catch (err) {
+    console.error("Failed to parse requested features:", err);
+  }
 
   const supabase = await createClient();
 
@@ -19,13 +33,18 @@ export async function provisionTenant(formData: FormData) {
     return { error: "Authentication required to provision a tenant." };
   }
 
+  // 3. Inject core, address, and telemetry data into the database
   const { data: business, error: bizError } = await supabase
     .from("businesses")
     .insert({
       owner_id: user.id,
       business_name: businessName,
       currency: currency || "PHP",
-      status: "pending" 
+      address: businessAddress || null, // NEW: Mapping to the existing DB column
+      status: "pending",
+      industry: industry || null,
+      employee_count: employeeCount || null,
+      requested_features: requestedFeatures
     })
     .select("id")
     .single();
@@ -72,7 +91,6 @@ export async function approveBusiness(formData: FormData) {
 
   if (error) return { error: error.message };
 
-  // Revalidate the correct Super Admin approvals path
   revalidatePath("/admin/businesses");
 }
 
@@ -86,7 +104,6 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
 
     if (!user) return { error: "Unauthorized" };
 
-    // Security Check
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
@@ -97,12 +114,8 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
       return { error: "Forbidden: Only Super Admins can alter tenant limits." };
     }
 
-    // Validation
-    if (newLimit < 0) {
-      return { error: "Staff limit cannot be less than 0." };
-    }
+    if (newLimit < 0) return { error: "Staff limit cannot be less than 0." };
 
-    // Update the database
     const { error: updateError } = await supabase
       .from("businesses")
       .update({ max_staff_limit: newLimit })
@@ -110,9 +123,7 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
 
     if (updateError) throw updateError;
 
-    // Force the Super Admin table to refresh and show the new number!
     revalidatePath("/admin/businesses"); 
-
     return { success: true };
   } catch (err: any) {
     return { error: err.message || "Failed to update tenant configuration." };
@@ -120,7 +131,7 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
 }
 
 // ============================================================================
-// 4. CREATE NEW ORGANIZATION (Now protected by SaaS Limits)
+// 4. CREATE NEW ORGANIZATION (SaaS Limit Firewall)
 // ============================================================================
 export async function createOrganization(formData: FormData) {
   const businessName = formData.get("business_name") as string;
@@ -131,7 +142,6 @@ export async function createOrganization(formData: FormData) {
 
   if (!user) return { error: "Unauthorized" };
 
-  // --- 1. THE SAAS LIMIT FIREWALL ---
   const { data: profile } = await supabase
     .from("profiles")
     .select("max_businesses_limit")
@@ -148,9 +158,7 @@ export async function createOrganization(formData: FormData) {
   if (count !== null && count >= limit) {
     return { error: `Plan Limit Reached: You are only permitted to manage ${limit} organization(s). Please contact a Super Admin to upgrade your account tier.` };
   }
-  // ----------------------------------
 
-  // 2. Insert the new business into the database
   const { data: newBusiness, error: bizError } = await supabase
     .from("businesses")
     .insert({
@@ -164,7 +172,6 @@ export async function createOrganization(formData: FormData) {
 
   if (bizError) return { error: bizError.message };
 
-  // 3. Automatically switch their active context
   await supabase
     .from("profiles")
     .update({ business_id: newBusiness.id })
@@ -183,7 +190,6 @@ export async function switchOrganization(targetBusinessId: string) {
 
   if (!user) return { error: "Unauthorized" };
 
-  // 1. Security Check: Verify they actually own this business before switching
   const { data: targetBusiness, error: checkError } = await supabase
     .from("businesses")
     .select("id")
@@ -195,7 +201,6 @@ export async function switchOrganization(targetBusinessId: string) {
     return { error: "You do not have access to this organization." };
   }
 
-  // 2. Update their profile to point to the new business
   const { error: updateError } = await supabase
     .from("profiles")
     .update({ business_id: targetBusiness.id })
@@ -203,7 +208,6 @@ export async function switchOrganization(targetBusinessId: string) {
 
   if (updateError) return { error: updateError.message };
 
-  // 3. Refresh the entire layout to load the new company's data
   revalidatePath("/", "layout");
   return { success: true };
 }

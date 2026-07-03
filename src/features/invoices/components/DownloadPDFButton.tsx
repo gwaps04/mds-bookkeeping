@@ -6,19 +6,21 @@ import { pdf } from '@react-pdf/renderer';
 import { InvoiceTemplate } from "./InvoiceTemplate";
 import { Button } from "@/components/ui/button";
 
-export function DownloadPDFButton({ invoice, items, business, currency }: any) {
+export function DownloadPDFButton({ invoice, items, business, currency, payments, refunds }: any) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
-      // 1. Compile the React Component into a PDF Document Blob
+      // 1. Compile the React Component into a PDF Document Blob (Now with payments/refunds!)
       const blob = await pdf(
         <InvoiceTemplate 
           invoice={invoice} 
           items={items} 
           business={business} 
           currency={currency} 
+          payments={payments}
+          refunds={refunds}
         />
       ).toBlob();
 
@@ -49,8 +51,10 @@ export function DownloadPDFButton({ invoice, items, business, currency }: any) {
       size="sm" 
       onClick={handleDownload} 
       disabled={isGenerating}
+      className="flex items-center gap-2"
     >
-      {isGenerating ? "Generating..." : "Download PDF"}
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+      {isGenerating ? "Compiling PDF..." : "Download PDF"}
     </Button>
   );
 }

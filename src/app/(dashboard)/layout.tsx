@@ -34,7 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // --- THE SMART TOGGLE ---
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
 
-  // --- WORKSPACE FETCH (NEW!) ---
+  // --- WORKSPACE FETCH ---
   let ownedCompanies: any[] = [];
   if (isBusinessOwner) {
     const { data: companies } = await supabase
@@ -48,7 +48,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // Prepare data for the User Profile Dropdown
   const displayRole = isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner';
-  const displayBusinessName = isSuperAdmin ? 'MDS System Control' : (rawBusinessName || 'Pending Business');
+  const displayBusinessName = isSuperAdmin ? 'MacroBiz System Control' : (rawBusinessName || 'Pending Business');
 
   if (!isSuperAdmin && !profile?.business_id) {
     redirect("/onboarding");
@@ -64,7 +64,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </CardHeader>
           <CardContent className="text-neutral-500 space-y-6">
             <p>Your business tenant has been provisioned successfully.</p>
-            <p>Macrotek Digital Solutions is currently reviewing the registration. You will be granted access to the ledger once approved.</p>
+            <p>MacroBiz Administration is currently reviewing the registration. You will be granted access to the ledger once approved.</p>
             <form action={logout}>
               <button type="submit" className="text-sm font-medium text-red-600 hover:underline">
                 Sign Out
@@ -79,16 +79,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="flex min-h-screen bg-neutral-50">
      
-      {/* 1. INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
+      {/* INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
       <RealtimeSync />
 
       {/* DESKTOP SIDEBAR */}
       <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col print:hidden">
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
-          <h1 className="text-xl font-bold tracking-tight text-neutral-900">MDS Ledger</h1>
+          {/* BRANDING UPDATE 1: Desktop Sidebar */}
+          <h1 className="text-xl font-bold tracking-tight text-neutral-900">MacroBiz</h1>
         </div>
         
-        {/* --- INJECT THE NEW INTELLIGENT SIDEBAR COMPONENT --- */}
+        {/* INJECT THE INTELLIGENT SIDEBAR COMPONENT */}
         <SideNav 
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
@@ -112,7 +113,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0 print:hidden">
           <div className="flex items-center gap-2 md:hidden">
             <MobileNav role={profile?.role} isTaxEnabled={isTaxEnabled} />
-            <span className="font-bold text-lg tracking-tight">MDS Ledger</span>
+            {/* BRANDING UPDATE 2: Mobile Header */}
+            <span className="font-bold text-lg tracking-tight">MacroBiz</span>
           </div>
 
           <div className="ml-auto flex items-center space-x-4">
@@ -128,12 +130,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* PAGE CONTENT & FOOTER WRAPPER */}
         <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white">
           
-          {/* Main children area grows to fill space, pushing footer down */}
           <div className="flex-1 p-6 md:p-8 w-full max-w-6xl mx-auto print:p-0">
             {children}
           </div>
           
-          {/* INJECTED FOOTER */}
           <div className="print:hidden">
             <Footer />
           </div>

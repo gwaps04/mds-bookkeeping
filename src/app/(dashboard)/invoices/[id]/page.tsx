@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import SubmitButton from "@/components/SubmitButton";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { DownloadPDFButton } from "@/features/invoices/components/DownloadPDFButton";
 
 export default function ViewInvoicePage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
@@ -25,16 +26,13 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
   const [businessName, setBusinessName] = useState("");
   
-  // RBAC States
   const [userRole, setUserRole] = useState("");
   const [allowStaffPayment, setAllowStaffPayment] = useState(true);
   const [allowStaffRefund, setAllowStaffRefund] = useState(true);
   
-  // Form States
   const [displayAmount, setDisplayAmount] = useState("");
   const [rawAmount, setRawAmount] = useState(0);
   
-  // Refund States & Security
   const [refundDisplay, setRefundDisplay] = useState("");
   const [refundRaw, setRefundRaw] = useState(0);
   const [refundError, setRefundError] = useState("");
@@ -72,11 +70,10 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
       setBankAccounts(banks || []);
     }
     fetchData();
-  }, [params.id]);
+  }, [params.id, router, supabase]);
 
   if (!invoice) return <div className="p-12 text-center animate-pulse text-neutral-500">Loading Enterprise A/R Data...</div>;
 
-  // --- ADVANCED ACCOUNTING RECONCILIATION ---
   const totalDue = Number(invoice.total_amount);
   const totalPayments = payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const approvedRefunds = refundRequests.filter(r => r.status === 'approved').reduce((sum, r) => sum + Number(r.amount), 0);
@@ -88,11 +85,9 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
   const isFullyPaid = remainingBalance === 0 && overpaymentAmount === 0;
   const isOverpaid = overpaymentAmount > 0;
 
-  // Security Variable for Render Logic
   const isOwner = userRole === 'business_owner' || userRole === 'super_admin';
   const canProcessRefund = isOwner || (userRole === 'staff' && allowStaffRefund);
 
-  // --- FORMATTERS ---
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>, setRaw: any, setDisplay: any) => {
     const value = e.target.value.replace(/[^0-9.]/g, ''); 
     if (!value) { setDisplay(''); setRaw(0); return; }
@@ -112,19 +107,29 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
           <Link href={`/invoices/${invoice.id}/edit`}>
             <Button variant="outline" size="sm" className="bg-white text-blue-600 border-blue-200">Edit Invoice</Button>
           </Link>
-          <Button size="sm" className="bg-neutral-900 text-white">🖨️ Print PDF</Button>
+          
+          <div className="[&>button]:bg-neutral-900 [&>button]:text-white [&>button:hover]:bg-neutral-800 [&>button]:border-none">
+            {/* DATA INJECTION: Passing payments and approved refunds down to the PDF engine */}
+            <DownloadPDFButton 
+              invoice={invoice} 
+              items={invoice.invoice_items || []} 
+              business={{ business_name: businessName }} 
+              currency="PHP" 
+              payments={payments}
+              refunds={refundRequests.filter(r => r.status === 'approved')}
+            />
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* LEFT COLUMN: PRINTABLE INVOICE */}
         <div className="lg:col-span-2">
           <Card className="shadow-lg border-neutral-200 bg-white min-h-[800px] p-8 md:p-12 relative overflow-hidden">
             <div className="flex justify-between items-start mb-16 relative z-10">
               <div>
                 <div className="flex items-center gap-4">
-                  <h1 className="text-4xl font-black text-neutral-900 uppercase tracking-tighter">INVOICE</h1>
+                  <h1 className="text-4xl font-black text-neutral-900 uppercase tracking-[0.15em]">INVOICE</h1>
                   
                   {isOverpaid ? (
                     <span className="bg-purple-100 text-purple-700 border border-purple-200 text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Overpaid</span>
@@ -228,7 +233,6 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
           </Card>
         </div>
 
-        {/* RIGHT COLUMN: TRACKERS & ACTIONS */}
         <div className="lg:col-span-1 space-y-6">
           
           <Card className="shadow-sm border-neutral-200">
@@ -317,7 +321,6 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
             </>
           )}
 
-          {/* NEW MODULE: SECURE TOGGLEABLE REFUND SYSTEM */}
           {isOverpaid && (
             <>
               {canProcessRefund ? (
