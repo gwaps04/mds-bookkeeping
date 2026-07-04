@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-// NEW: Imported Camera and Upload icons for the Scanner Zone
+// Import Upload and Camera icons for the context-aware UI
 import { Paperclip, Camera, Upload } from "lucide-react"; 
 
 export default async function ExpensesPage(props: { 
@@ -30,7 +30,7 @@ export default async function ExpensesPage(props: {
   const currency = bizData?.currency || "PHP";
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // 2. Fetch Accounts (Assets = Pay From, Expenses = Category)
+  // 2. Fetch Accounts
   const { data: accounts } = await supabase
     .from("accounts")
     .select("id, name, type")
@@ -42,7 +42,7 @@ export default async function ExpensesPage(props: {
   const expenseCategories = accounts?.filter(a => a.type === "expense") || [];
 
   // ============================================================================
-  // 3. THE TEMPORAL BRIDGE (Timezone-Agnostic Boundary Calculator)
+  // 3. THE TEMPORAL BRIDGE
   // ============================================================================
   let startDate = params?.from || null;
   let endDate = params?.to || null;
@@ -53,7 +53,6 @@ export default async function ExpensesPage(props: {
     if (params?.month && params.month !== 'all') {
       const monthStr = params.month.padStart(2, '0');
       const lastDay = new Date(Number(yearStr), Number(params.month), 0).getDate();
-      
       startDate = `${yearStr}-${monthStr}-01`;
       endDate = `${yearStr}-${monthStr}-${lastDay}T23:59:59.999`;
     } else {
@@ -86,17 +85,18 @@ export default async function ExpensesPage(props: {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
-        <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Expenses</h2>
-        <p className="text-neutral-500 mt-1">Record and manage business outflows, bills, and purchases.</p>
+        <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-neutral-900">Expenses</h2>
+        <p className="text-sm md:text-base text-neutral-500 mt-1">Record and manage business outflows, bills, and purchases.</p>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-3">
+      {/* THE FIX: Changed md:grid-cols-3 to lg:grid-cols-3 to protect Tablet Portrait views */}
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
         {/* CREATE FORM */}
-        <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200 sticky top-8">
+        <div className="lg:col-span-1">
+          <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
             <CardHeader>
               <CardTitle className="text-lg">Record Expense</CardTitle>
               <CardDescription>Log money leaving the business.</CardDescription>
@@ -153,29 +153,37 @@ export default async function ExpensesPage(props: {
                   <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-16" required />
                 </div>
 
-                {/* THE NEW SMART SCANNER / UPLOAD ZONE */}
+                {/* THE NEW CONTEXT-AWARE SCANNER / UPLOAD ZONE */}
                 <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-blue-200 rounded text-blue-600 shadow-sm">
-                      <Camera size={14} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Camera</span>
+                      {/* Mobile shows Camera, Desktop shows Upload Icon */}
+                      <Camera size={14} className="md:hidden" />
+                      <Upload size={14} className="hidden md:block" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
                     </div>
                     <Label htmlFor="receipt" className="text-neutral-700 font-semibold cursor-pointer">
                       Attach Receipt (Optional)
                     </Label>
                   </div>
                   
-                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3">
-                    Tap the button below on your mobile device to open your camera and instantly scan a physical receipt.
+                  {/* CSS Toggle: Only shows on mobile (below md breakpoint) */}
+                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 md:hidden">
+                    Tap the button below to open your camera and scan a receipt.
                   </p>
                   
-                  {/* By setting accept="image/*, application/pdf", iOS and Android will automatically prompt the user to use their Camera! */}
+                  {/* CSS Toggle: Only shows on desktop/large tablets (above md breakpoint) */}
+                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 hidden md:block">
+                    Click below to select a scanned image or PDF from your computer.
+                  </p>
+                  
                   <Input 
                     id="receipt" 
                     name="receipt" 
                     type="file" 
                     accept="image/*, application/pdf" 
-                    className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto" 
+                    className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto w-full" 
                   />
                 </div>
 
@@ -190,29 +198,31 @@ export default async function ExpensesPage(props: {
         </div>
 
         {/* RIGHT COLUMN: FILTER & TABLE */}
-        <div className="md:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4">
           
           {/* SEARCH & FILTER BAR */}
           <Card className="shadow-sm border-neutral-200 bg-white">
             <CardContent className="p-4">
-              <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
+              <form method="GET" className="flex flex-col xl:flex-row gap-3 xl:items-end">
                 <div className="flex-1 w-full space-y-1">
                   <Label className="text-xs text-neutral-500">Search Notes</Label>
                   <Input name="search" placeholder="Search description..." defaultValue={params?.search} />
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">From Date</Label>
-                  <Input type="date" name="from" defaultValue={params?.from} />
+                <div className="grid grid-cols-2 gap-3 w-full xl:w-auto">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-neutral-500">From Date</Label>
+                    <Input type="date" name="from" defaultValue={params?.from} className="w-full xl:w-36" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-neutral-500">To Date</Label>
+                    <Input type="date" name="to" defaultValue={params?.to} className="w-full xl:w-36" />
+                  </div>
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">To Date</Label>
-                  <Input type="date" name="to" defaultValue={params?.to} />
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
+                <div className="flex gap-2 w-full xl:w-auto mt-2 xl:mt-0">
+                  <Button type="submit" className="bg-neutral-900 text-white flex-1 xl:flex-none">Filter</Button>
                   {(params?.search || params?.from || params?.to || params?.month || params?.year) && (
-                    <Link href="/expenses">
-                      <Button variant="outline" className="text-neutral-500">Clear Filter</Button>
+                    <Link href="/expenses" className="flex-1 xl:flex-none">
+                      <Button variant="outline" className="text-neutral-500 w-full">Clear</Button>
                     </Link>
                   )}
                 </div>
@@ -245,9 +255,8 @@ export default async function ExpensesPage(props: {
                       <td className="px-4 py-4 text-neutral-500">{new Date(exp.date).toLocaleDateString()}</td>
                       <td className="px-4 py-4">
                         <p className="font-medium text-neutral-900">{exp.vendors?.name || 'Unknown Vendor'}</p>
-                        <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[200px]">{exp.description}</p>
+                        <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[150px] lg:max-w-[200px]">{exp.description}</p>
                         
-                        {/* RECEIPT BADGE DISPLAY */}
                         {exp.receipt_url && (
                           <a 
                             href={exp.receipt_url} 
@@ -268,7 +277,7 @@ export default async function ExpensesPage(props: {
                         -{formatCurrency(Number(exp.amount))}
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-center gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
                           <Link href={`/expenses/${exp.id}/edit`}>
                             <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
                           </Link>
