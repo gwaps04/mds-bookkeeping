@@ -10,7 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
 
-export default async function IncomePage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
+// THE FIX: Added month and year to the expected searchParams Promise
+export default async function IncomePage(props: { 
+  searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
+}) {
   // Resolve URL Search Parameters for filtering
   const params = await props.searchParams;
   
@@ -41,7 +44,35 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
   const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
   const revenueCategories = accounts?.filter(a => a.type === "revenue") || [];
 
-  // 3. BUILD THE SEARCH & FILTER QUERY
+  // ============================================================================
+  // 3. THE TEMPORAL BRIDGE (Timezone-Agnostic Boundary Calculator)
+  // ============================================================================
+  // Start with manual filters if the user typed them into the form
+  let startDate = params?.from || null;
+  let endDate = params?.to || null;
+
+  // If no manual filters, check if the Dashboard handed us a Month/Year
+  if (!startDate && !endDate && params?.year) {
+    const yearStr = params.year;
+    
+    if (params?.month && params.month !== 'all') {
+      // Create exact YYYY-MM-DD strings to avoid NodeJS Timezone drift
+      const monthStr = params.month.padStart(2, '0');
+      // Day 0 of the *next* month magically gives us the last day of the *current* month
+      const lastDay = new Date(Number(yearStr), Number(params.month), 0).getDate();
+      
+      startDate = `${yearStr}-${monthStr}-01`;
+      endDate = `${yearStr}-${monthStr}-${lastDay}T23:59:59.999`;
+    } else {
+      // "All Year" selected
+      startDate = `${yearStr}-01-01`;
+      endDate = `${yearStr}-12-31T23:59:59.999`;
+    }
+  }
+
+  // ============================================================================
+  // 4. BUILD THE SEARCH & FILTER QUERY
+  // ============================================================================
   let query = supabase
     .from("income")
     .select(`
@@ -54,17 +85,14 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
 
   // Apply Search Parameter filters to the Query
   if (params?.search) {
-    // We search the 'description' column. Note: searching joined customer names is complex in Supabase, 
-    // so this searches the description and reference notes.
     query = query.ilike("description", `%${params.search}%`); 
   }
-  if (params?.from) {
-    query = query.gte("date", params.from);
-  }
-  if (params?.to) {
-    query = query.lte("date", params.to);
-  }
+  
+  // Inject the calculated absolute string boundaries into Postgres
+  if (startDate) query = query.gte("date", startDate);
+  if (endDate) query = query.lte("date", endDate);
 
+  // Execute the query!
   const { data: incomeRecords } = await query;
 
   const formatCurrency = (amount: number) => {
@@ -153,10 +181,10 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
                 </div>
 
                 <SubmitButton 
-  title="Record Income" 
-  loadingTitle="Saving Record..." 
-  className="w-full bg-green-600 hover:bg-green-700 text-white" 
-/>
+                  title="Record Income" 
+                  loadingTitle="Saving Record..." 
+                  className="w-full bg-green-600 hover:bg-green-700 text-white" 
+                />
               </form>
             </CardContent>
           </Card>
@@ -183,7 +211,9 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
                   <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
-                  {(params?.search || params?.from || params?.to) && (
+                  
+                  {/* THE FIX: Ensure Clear Button appears when dashboard month/year is active */}
+                  {(params?.search || params?.from || params?.to || params?.month || params?.year) && (
                     <Link href="/income">
                       <Button variant="outline" className="text-neutral-500">Clear</Button>
                     </Link>
@@ -209,7 +239,7 @@ export default async function IncomePage(props: { searchParams: Promise<{ search
                 {(!incomeRecords || incomeRecords.length === 0) ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-neutral-500">
-                      No income records found for these filters.
+                      No income records found for this period.
                     </td>
                   </tr>
                 ) : (

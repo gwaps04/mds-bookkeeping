@@ -5,15 +5,14 @@ import { Button } from "@/components/ui/button";
 import { reviewRefund } from "@/features/refunds/actions";
 import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
-import { Wallet, Receipt, CreditCard, Activity, Landmark } from "lucide-react"; 
+// Added TrendingUp for the Net Income card
+import { Wallet, Receipt, CreditCard, Activity, Landmark, Banknote, TrendingUp } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export default async function DashboardPage({ searchParams }: { searchParams: { month?: string, year?: string } }) {
-  // Await the searchParams promise (Next.js 15+ requirement)
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ month?: string, year?: string }> }) {
   const params = await searchParams;
-  
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -57,33 +56,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
   // 4. THE TIMEZONE-PROOF TEMPORAL ENGINE
   // ============================================================================
   const now = new Date();
-  
-  // A. Check if the user is in the default state
   const isDefaultState = !params.month && !params.year;
-
-  // B. Parse the strict parameters
   const selectedMonth = params.month === 'all' ? 'all' : parseInt(params.month || String(now.getMonth() + 1));
   const selectedYear = parseInt(params.year || String(now.getFullYear()));
 
-  // C. THE FIX: Absolute String Slicing boundary logic (Bypasses Server Timezone completely)
   const isInPeriod = (dateString: string) => {
     if (!dateString) return false;
-    
-    // Supabase dates arrive as "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm:ss"
-    // By slicing the absolute characters, we prevent Node.js from shifting the timezone
     const itemYear = dateString.substring(0, 4);
     const itemMonth = dateString.substring(5, 7);
 
-    if (selectedMonth === 'all') {
-      return itemYear === String(selectedYear); // Match full year only
-    }
-    
-    // Ensure single-digit months (like "6") become "06" to match the database string
+    if (selectedMonth === 'all') return itemYear === String(selectedYear); 
     const targetMonth = String(selectedMonth).padStart(2, '0');
     return itemYear === String(selectedYear) && itemMonth === targetMonth; 
   };
 
-  // D. Label Generator
   const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   let periodLabel = "";
   if (isDefaultState) {
@@ -100,6 +86,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
   let totalIncomeAllTime = 0; 
   let totalExpensesAllTime = 0; 
   
+  let periodIncome = 0; 
   let periodExpenses = 0; 
   let periodTransactions = 0; 
   let periodTaxesPaid = 0; 
@@ -114,6 +101,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
     totalIncomeAllTime += amt; 
     
     if (isInPeriod(inc.date)) {
+      periodIncome += amt; 
       periodTransactions++;
       recentActivity.push({ id: inc.id, type: "income", amount: amt, date: inc.date, party: (inc.customers as any)?.name || "Walk-in Customer", description: inc.description || "Cash Receipt" });
     }
@@ -138,7 +126,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
     }
   });
 
-  const totalCash = totalIncomeAllTime - totalExpensesAllTime;
+  // THE BALANCES
+  const totalCashAllTime = totalIncomeAllTime - totalExpensesAllTime; // Card 1 (Liquidity)
+  const periodNetIncome = periodIncome - periodExpenses; // NEW Card 4 (P&L Performance)
   
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const top5Activity = recentActivity.slice(0, 5);
@@ -159,9 +149,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
         <DashboardFilter />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 md:gap-6">
+      {/* Grid updated to max 4 columns for stable wrapping of 7 cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
         
-        {/* POINT-IN-TIME: Net Cash */}
+        {/* CARD 1: THE LIQUIDITY ANCHOR (Strictly All-Time) */}
         {canSeeNetCash && (
           <Link href="/transactions" className="block group">
             <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
@@ -171,33 +162,35 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
                 <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Wallet size={16} /></div>
               </CardHeader>
               <CardContent>
-                <div className={`text-2xl md:text-3xl font-bold tracking-tight truncate ${totalCash < 0 ? 'text-red-600' : 'text-neutral-900'}`} title={formatCurrency(totalCash)}>
-                  {formatCurrency(totalCash)}
+                <div className={`text-2xl md:text-3xl font-bold tracking-tight truncate ${totalCashAllTime < 0 ? 'text-red-600' : 'text-neutral-900'}`} title={formatCurrency(totalCashAllTime)}>
+                  {formatCurrency(totalCashAllTime)}
                 </div>
-                <p className="text-[10px] text-neutral-400 mt-1 uppercase tracking-widest font-medium">All Time</p>
+                <p className="text-[10px] text-neutral-400 mt-1.5 uppercase tracking-widest font-bold">ALL TIME</p>
               </CardContent>
             </Card>
           </Link>
         )}
 
-        {/* POINT-IN-TIME: Unpaid Invoices */}
-        <Link href="/invoices?status=unpaid" className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+        {/* CARD 2: TOTAL INCOME (Follows Period Filter) */}
+        <Link href={`/income?month=${selectedMonth}&year=${selectedYear}`} className="block group">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Unpaid Invoices</CardTitle>
-              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-md shrink-0"><Receipt size={16} /></div>
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Total Income</CardTitle>
+              <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Banknote size={16} /></div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={formatCurrency(unpaidInvoicesTotal)}>
-                {formatCurrency(unpaidInvoicesTotal)}
+              <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={formatCurrency(periodIncome)}>
+                {formatCurrency(periodIncome)}
               </div>
-              <p className="text-[10px] sm:text-xs text-blue-600 font-medium mt-1 truncate">{unpaidInvoicesCount} invoice(s) pending</p>
+              <p className="text-[9px] sm:text-[10px] text-emerald-700 mt-1.5 font-bold uppercase tracking-widest bg-emerald-50 border border-emerald-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
+                {periodLabel}
+              </p>
             </CardContent>
           </Card>
         </Link>
 
-        {/* PERIOD METRIC: Expenses */}
+        {/* CARD 3: TOTAL EXPENSES (Follows Period Filter) */}
         <Link href={`/expenses?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-rose-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -216,7 +209,43 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
           </Card>
         </Link>
 
-        {/* PERIOD METRIC: Tx Volume */}
+        {/* NEW CARD 4: NET INCOME (Follows Period Filter) */}
+        <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Net Income</CardTitle>
+              <div className="p-1.5 bg-teal-50 text-teal-600 rounded-md shrink-0"><TrendingUp size={16} /></div>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl md:text-3xl font-bold tracking-tight truncate ${periodNetIncome < 0 ? 'text-rose-600' : 'text-neutral-900'}`} title={formatCurrency(periodNetIncome)}>
+                {formatCurrency(periodNetIncome)}
+              </div>
+              <p className="text-[9px] sm:text-[10px] text-teal-700 mt-1.5 font-bold uppercase tracking-widest bg-teal-50 border border-teal-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
+                {periodLabel}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* CARD 5: UNPAID INVOICES (Point in Time) */}
+        <Link href="/invoices?status=unpaid" className="block group">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Unpaid Invoices</CardTitle>
+              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-md shrink-0"><Receipt size={16} /></div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={formatCurrency(unpaidInvoicesTotal)}>
+                {formatCurrency(unpaidInvoicesTotal)}
+              </div>
+              <p className="text-[10px] sm:text-xs text-blue-600 font-medium mt-1.5 truncate">{unpaidInvoicesCount} invoice(s) pending</p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* CARD 6: TX VOLUME (Follows Period Filter) */}
         <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -228,12 +257,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
               <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={String(periodTransactions)}>
                 {periodTransactions}
               </div>
-              <p className="text-[10px] text-neutral-400 mt-1 uppercase tracking-widest font-medium truncate">{periodLabel}</p>
+              <p className="text-[9px] sm:text-[10px] text-indigo-600 mt-1.5 font-bold uppercase tracking-widest bg-indigo-50 border border-indigo-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
+                {periodLabel}
+              </p>
             </CardContent>
           </Card>
         </Link>
 
-        {/* PERIOD METRIC: Taxes */}
+        {/* CARD 7: TAXES (Follows Period Filter) */}
         {canSeeTaxes && (
           <Link href={`/taxes?month=${selectedMonth}&year=${selectedYear}`} className="block group">
             <Card className="shadow-sm border-neutral-200 bg-white hover:border-orange-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
