@@ -4,6 +4,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { logSecurityEvent } from "@/lib/audit"; // <-- IMPORTED THE AUDIT LOGGER
 
 // ============================================================================
 // 1. PROVISION TENANT (Upgraded with Address & Telemetry)
@@ -11,7 +12,7 @@ import { revalidatePath } from "next/cache";
 export async function provisionTenant(formData: FormData) {
   const businessName = formData.get("business_name") as string;
   const currency = formData.get("currency") as string;
-  const businessAddress = formData.get("business_address") as string; // NEW: Extracting the address
+  const businessAddress = formData.get("business_address") as string; 
   
   // 1. Extract Telemetry Data
   const industry = formData.get("industry") as string;
@@ -40,7 +41,7 @@ export async function provisionTenant(formData: FormData) {
       owner_id: user.id,
       business_name: businessName,
       currency: currency || "PHP",
-      address: businessAddress || null, // NEW: Mapping to the existing DB column
+      address: businessAddress || null, 
       status: "pending",
       industry: industry || null,
       employee_count: employeeCount || null,
@@ -246,4 +247,44 @@ export async function updateOwnerOrgLimit(ownerId: string, newLimit: number) {
   } catch (err: any) {
     return { error: err.message || "Failed to update organization limit." };
   }
+}
+
+// ============================================================================
+// 7. TOGGLE BUSINESS FEATURE (Super Admin Only)
+// ============================================================================
+export async function toggleBusinessFeature(businessId: string, featureColumn: string, newValue: boolean) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  // Security Check: Only Super Admins can toggle features
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== 'super_admin') {
+    throw new Error("Security Violation: Only Super Admins can modify tenant features.");
+  }
+
+  // Prevent SQL injection by strictly matching allowed columns
+  const allowedFeatures = ['allow_receipt_uploads', 'allow_staff_account_creation', 'allow_staff_payment_logging', 'show_net_cash_to_staff', 'show_taxes_to_staff', 'allow_staff_refund_request'];
+  if (!allowedFeatures.includes(featureColumn)) {
+    throw new Error("Invalid feature column.");
+  }
+
+  const { error } = await supabase
+    .from("businesses")
+    .update({ [featureColumn]: newValue })
+    .eq("id", businessId);
+
+  if (error) throw new Error(error.message);
+
+  // Log the action for Enterprise auditing
+  await logSecurityEvent({
+    businessId,
+    actorId: user.id,
+    action: "TOGGLED_TENANT_FEATURE",
+    tableName: "businesses",
+    recordId: businessId,
+    details: { feature: featureColumn, newValue }
+  });
+
+  revalidatePath("/admin/businesses");
 }

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
 import ManageLimitButton from "./ManageLimitButton"; 
-import ManageOrgLimitButton from "./ManageOrgLimitButton"; // <-- NEW IMPORT
+import ManageOrgLimitButton from "./ManageOrgLimitButton"; 
+import ManageFeaturesButton from "./ManageFeaturesButton"; // <-- THE NEW IMPORT
 
 export default async function SuperAdminBusinessesPage() {
   const supabase = await createClient();
@@ -21,7 +22,7 @@ export default async function SuperAdminBusinessesPage() {
     redirect("/dashboard");
   }
 
-  // Fetch Businesses + Owner Profile Data (Added id and max_businesses_limit)
+  // Fetch Businesses + Features
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
@@ -30,6 +31,7 @@ export default async function SuperAdminBusinessesPage() {
       status,
       created_at,
       max_staff_limit,
+      allow_receipt_uploads,
       profiles ( id, full_name, email, role, max_businesses_limit )
     `)
     .order("created_at", { ascending: false });
@@ -67,11 +69,13 @@ export default async function SuperAdminBusinessesPage() {
                   </tr>
                 ) : (
                   businesses.map((biz) => {
-                    // Extract the owner profile
                     const isArray = Array.isArray(biz.profiles);
                     const owner = isArray 
                       ? (biz.profiles as any[]).find(p => p.role === 'business_owner') 
                       : biz.profiles;
+
+                    // Fallback to true if the column was just created and is null
+                    const hasReceipts = biz.allow_receipt_uploads !== false; 
 
                     return (
                       <tr key={biz.id} className="hover:bg-neutral-50 transition-colors">
@@ -81,9 +85,7 @@ export default async function SuperAdminBusinessesPage() {
                         <td className="px-6 py-4">
                           <div className="flex flex-col items-start">
                             <span className="font-medium text-neutral-900">{owner?.full_name || 'Unknown'}</span>
-                            <span className="text-xs text-neutral-500">{owner?.email}</span>
-                            
-                            {/* INJECTING THE ORGANIZATION LIMIT BUTTON HERE */}
+                            <span className="text-xs text-neutral-500 mb-1">{owner?.email}</span>
                             {owner?.id && (
                               <ManageOrgLimitButton 
                                 ownerId={owner.id} 
@@ -117,8 +119,13 @@ export default async function SuperAdminBusinessesPage() {
                               </Button>
                             </form>
                           ) : (
-                            <div className="flex items-center justify-end gap-3">
-                              <span className="text-xs font-medium text-neutral-400">Approved</span>
+                            <div className="flex items-center justify-end gap-2">
+                              {/* THE NEW FEATURES BUTTON */}
+                              <ManageFeaturesButton 
+                                businessId={biz.id} 
+                                businessName={biz.business_name}
+                                currentReceiptStatus={hasReceipts}
+                              />
                               <ManageLimitButton 
                                 businessId={biz.id} 
                                 businessName={biz.business_name} 

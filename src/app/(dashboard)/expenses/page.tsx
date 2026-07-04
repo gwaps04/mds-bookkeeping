@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-// Import Upload and Camera icons for the context-aware UI
 import { Paperclip, Camera, Upload } from "lucide-react"; 
 
 export default async function ExpensesPage(props: { 
@@ -19,16 +18,21 @@ export default async function ExpensesPage(props: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Get Profile & Role
+  // ============================================================================
+  // 1. THE GATEKEEPER: Get Profile, Role & Business Features
+  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, role, businesses(currency)")
+    .select("business_id, role, businesses(currency, allow_receipt_uploads)") 
     .eq("id", user?.id)
     .single();
 
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+  
+  // Evaluates to true UNLESS explicitly set to false by the Super Admin
+  const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
 
   // 2. Fetch Accounts
   const { data: accounts } = await supabase
@@ -91,7 +95,6 @@ export default async function ExpensesPage(props: {
         <p className="text-sm md:text-base text-neutral-500 mt-1">Record and manage business outflows, bills, and purchases.</p>
       </div>
 
-      {/* THE FIX: Changed md:grid-cols-3 to lg:grid-cols-3 to protect Tablet Portrait views */}
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
         {/* CREATE FORM */}
@@ -153,39 +156,58 @@ export default async function ExpensesPage(props: {
                   <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-16" required />
                 </div>
 
-                {/* THE NEW CONTEXT-AWARE SCANNER / UPLOAD ZONE */}
-                <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-blue-200 rounded text-blue-600 shadow-sm">
-                      {/* Mobile shows Camera, Desktop shows Upload Icon */}
-                      <Camera size={14} className="md:hidden" />
-                      <Upload size={14} className="hidden md:block" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
+                {/* ============================================================================ */}
+                {/* THE SAAS FEATURE GATE: CONDITIONAL RENDER */}
+                {/* ============================================================================ */}
+                {canUploadReceipts ? (
+                  <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-blue-200 rounded text-blue-600 shadow-sm">
+                        <Camera size={14} className="md:hidden" />
+                        <Upload size={14} className="hidden md:block" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
+                      </div>
+                      <Label htmlFor="receipt" className="text-neutral-700 font-semibold cursor-pointer">
+                        Attach Receipt (Optional)
+                      </Label>
                     </div>
-                    <Label htmlFor="receipt" className="text-neutral-700 font-semibold cursor-pointer">
-                      Attach Receipt (Optional)
-                    </Label>
+                    
+                    <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 md:hidden">
+                      Tap the button below to open your camera and scan a receipt.
+                    </p>
+                    <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 hidden md:block">
+                      Click below to select a scanned image or PDF from your computer.
+                    </p>
+                    
+                    {/* STRICT MIME TYPES: Only JPG, PNG, and PDF allowed */}
+                    <Input 
+                      id="receipt" 
+                      name="receipt" 
+                      type="file" 
+                      accept="image/jpeg, image/png, application/pdf" 
+                      className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto w-full" 
+                    />
                   </div>
-                  
-                  {/* CSS Toggle: Only shows on mobile (below md breakpoint) */}
-                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 md:hidden">
-                    Tap the button below to open your camera and scan a receipt.
-                  </p>
-                  
-                  {/* CSS Toggle: Only shows on desktop/large tablets (above md breakpoint) */}
-                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 hidden md:block">
-                    Click below to select a scanned image or PDF from your computer.
-                  </p>
-                  
-                  <Input 
-                    id="receipt" 
-                    name="receipt" 
-                    type="file" 
-                    accept="image/*, application/pdf" 
-                    className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto w-full" 
-                  />
-                </div>
+                ) : (
+                  /* THE LOCKED UPSELL UI */
+                  <div className="space-y-3 p-4 bg-neutral-50 rounded-lg border border-neutral-200 relative overflow-hidden flex flex-col items-center text-center">
+                    <div className="absolute top-0 right-0 p-3 opacity-5 text-4xl pointer-events-none">🔒</div>
+                    <div className="p-2 bg-neutral-200 text-neutral-500 rounded-full mb-1">
+                      <Camera size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-neutral-900">Receipt Scanning Locked</h4>
+                      <p className="text-[11px] text-neutral-500 leading-relaxed mt-1 max-w-[200px] mx-auto">
+                        Digital document storage and mobile scanning are available on Premium plans.
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" className="h-7 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50 mt-1 cursor-not-allowed">
+                      Upgrade to Unlock
+                    </Button>
+                  </div>
+                )}
+                {/* ============================================================================ */}
 
                 <SubmitButton 
                   title="Record Expense" 
@@ -200,7 +222,6 @@ export default async function ExpensesPage(props: {
         {/* RIGHT COLUMN: FILTER & TABLE */}
         <div className="lg:col-span-2 space-y-4">
           
-          {/* SEARCH & FILTER BAR */}
           <Card className="shadow-sm border-neutral-200 bg-white">
             <CardContent className="p-4">
               <form method="GET" className="flex flex-col xl:flex-row gap-3 xl:items-end">
@@ -230,7 +251,6 @@ export default async function ExpensesPage(props: {
             </CardContent>
           </Card>
 
-          {/* EXPENSES DATA TABLE */}
           <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-[600px]">
               <thead className="bg-neutral-50 border-b border-neutral-200">
