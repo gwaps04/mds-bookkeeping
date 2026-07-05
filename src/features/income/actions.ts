@@ -4,88 +4,62 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { logSecurityEvent } from "@/lib/audit"; // <-- The Security Logger!
+import { logSecurityEvent } from "@/lib/audit";
 
 // ============================================================================
-// 1. CREATE INCOME (Available to Owners & Staff)
+// 1. CREATE DIRECT INCOME
 // ============================================================================
 export async function createIncome(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-
   if (!user) throw new Error("Unauthorized");
 
-  // Get the user's business ID
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("business_id")
-    .eq("id", user.id)
-    .single();
+  const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
+  const businessId = profile?.business_id;
 
-  const business_id = profile?.business_id;
-  
-  // Extract form data
-  const customer_name = formData.get("customer_name") as string;
-  const amount = formData.get("amount");
-  const date = formData.get("date");
-  const account_id = formData.get("account_id");
-  const category_id = formData.get("category_id");
-  const description = formData.get("description");
-  const reference_number = formData.get("reference_number"); 
+  const customerName = formData.get("customer_name") as string || "Walk-in";
+  const amount = parseFloat(formData.get("amount") as string);
+  const date = formData.get("date") as string;
+  const categoryId = formData.get("category_id") as string;
+  const accountId = formData.get("account_id") as string;
+  const reference = formData.get("reference_number") as string;
+  const description = formData.get("description") as string;
 
-  // SMART CUSTOMER RESOLUTION: Find the customer, or create a new one instantly
-  let customer_id = null;
-  if (customer_name) {
-    const { data: existingCustomer } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("business_id", business_id)
-      .ilike("name", customer_name) 
-      .maybeSingle();
+  // MATHEMATICAL SERVER GUARD: Prevent Zero or Negative Amounts
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error("Income amount must be greater than zero.");
+  }
 
-    if (existingCustomer) {
-      customer_id = existingCustomer.id;
+  // SMART CUSTOMER RESOLUTION
+  let customerId = null;
+  if (customerName !== "Walk-in") {
+    let { data: existingCustomer } = await supabase.from("customers").select("id").eq("business_id", businessId).ilike("name", customerName).maybeSingle();
+    if (!existingCustomer) {
+      const { data: newCustomer } = await supabase.from("customers").insert([{ business_id: businessId, name: customerName }]).select("id").single();
+      customerId = newCustomer?.id;
     } else {
-      const { data: newCustomer } = await supabase
-        .from("customers")
-        .insert([{ business_id, name: customer_name }])
-        .select("id")
-        .single();
-      customer_id = newCustomer?.id;
+      customerId = existingCustomer.id;
     }
   }
 
-  // INSERT THE INCOME RECORD
-  // (We added .select("id").single() so we can capture the ID for the audit log)
-  const { data: newIncome, error } = await supabase
-    .from("income")
-    .insert([{
-      business_id,
-      customer_id,
-      account_id,
-      category_id,
-      amount,
-      date,
-      description,
-      reference_number,
-      created_by: user.id
-    }])
-    .select("id")
-    .single();
+  const { data: newIncome, error } = await supabase.from("income").insert([{
+    business_id: businessId,
+    customer_id: customerId,
+    amount: amount,
+    date: date,
+    category_id: categoryId,
+    account_id: accountId,
+    reference_number: reference,
+    description: description,
+    created_by: user.id
+  }]).select("id").single();
 
-  if (error) {
-    console.error("Income creation failed:", error);
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
-  // --- TRIGGER SECURITY TRIPWIRE ---
+  // RICH AUDIT LOGGING
   await logSecurityEvent({
-    businessId: business_id as string,
-    actorId: user.id,
-    action: "RECORDED_INCOME",
-    tableName: "income",
-    recordId: newIncome.id,
-    details: { amount, customer_name, description }
+    businessId: businessId as string, actorId: user.id, action: "RECORDED_INCOME", tableName: "income", recordId: newIncome.id,
+    details: { client_name: customerName, amount: amount, notes: description }
   });
 
   revalidatePath("/income");
@@ -94,7 +68,7 @@ export async function createIncome(formData: FormData) {
 }
 
 // ============================================================================
-// 2. UPDATE INCOME (Available to Owners & Staff)
+// 2. UPDATE DIRECT INCOME
 // ============================================================================
 export async function updateIncome(formData: FormData) {
   const supabase = await createClient();
@@ -102,64 +76,48 @@ export async function updateIncome(formData: FormData) {
   if (!user) throw new Error("Unauthorized");
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
-  const business_id = profile?.business_id;
+  const businessId = profile?.business_id;
 
   const id = formData.get("id") as string;
-  const customer_name = formData.get("customer_name") as string;
-  const amount = formData.get("amount");
-  const date = formData.get("date");
-  const account_id = formData.get("account_id");
-  const category_id = formData.get("category_id");
-  const description = formData.get("description");
-  const reference_number = formData.get("reference_number");
+  const customerName = formData.get("customer_name") as string;
+  const amount = parseFloat(formData.get("amount") as string);
+  const date = formData.get("date") as string;
+  const accountId = formData.get("account_id") as string;
+  const categoryId = formData.get("category_id") as string;
+  const reference = formData.get("reference_number") as string;
+  const description = formData.get("description") as string;
+  const editReason = formData.get("edit_reason") as string || "Staff manually edited income record.";
 
-  // Fetch old record for the Audit Trail
-  const { data: oldRecord } = await supabase.from("income").select("*").eq("id", id).single();
+  // MATHEMATICAL SERVER GUARD
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error("Income amount must be greater than zero.");
+  }
 
-  // SMART CUSTOMER RESOLUTION (For Edits)
-  let customer_id = oldRecord?.customer_id;
-  if (customer_name) {
-    const { data: existingCustomer } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("business_id", business_id)
-      .ilike("name", customer_name)
-      .maybeSingle();
+  // Fetch old record for the Audit Trail comparison
+  const { data: oldRecord } = await supabase.from("income").select("amount, description, customer_id").eq("id", id).single();
 
+  // SMART CUSTOMER RESOLUTION
+  let customerId = oldRecord?.customer_id;
+  if (customerName) {
+    const { data: existingCustomer } = await supabase.from("customers").select("id").eq("business_id", businessId).ilike("name", customerName).maybeSingle();
     if (existingCustomer) {
-      customer_id = existingCustomer.id;
+      customerId = existingCustomer.id;
     } else {
-      const { data: newCustomer } = await supabase
-        .from("customers")
-        .insert([{ business_id, name: customer_name }])
-        .select("id")
-        .single();
-      customer_id = newCustomer?.id;
+      const { data: newCustomer } = await supabase.from("customers").insert([{ business_id: businessId, name: customerName }]).select("id").single();
+      customerId = newCustomer?.id;
     }
   }
 
-  // Execute Update
-  const { error } = await supabase
-    .from("income")
-    .update({
-      customer_id, account_id, category_id, amount, date, description, reference_number
-    })
-    .eq("id", id)
-    .eq("business_id", business_id);
+  const { error } = await supabase.from("income").update({
+    customer_id: customerId, account_id: accountId, category_id: categoryId, amount: amount, date: date, reference_number: reference, description: description
+  }).eq("id", id).eq("business_id", businessId);
 
   if (error) throw new Error(error.message);
 
-  // --- TRIGGER SECURITY TRIPWIRE ---
+  // RICH AUDIT LOGGING
   await logSecurityEvent({
-    businessId: business_id as string,
-    actorId: user.id,
-    action: "EDITED_INCOME",
-    tableName: "income",
-    recordId: id,
-    details: { 
-      previous: { amount: oldRecord?.amount, description: oldRecord?.description },
-      new: { amount, description, customer_name } 
-    }
+    businessId: businessId as string, actorId: user.id, action: "EDITED_INCOME", tableName: "income", recordId: id,
+    details: { old_amount: oldRecord?.amount, new_amount: amount, reason: editReason }
   });
 
   revalidatePath("/income");
@@ -169,35 +127,38 @@ export async function updateIncome(formData: FormData) {
 }
 
 // ============================================================================
-// 3. DELETE INCOME (OWNERS ONLY)
+// 3. DELETE / VOID DIRECT INCOME
 // ============================================================================
 export async function deleteIncome(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  const id = formData.get("id") as string;
-
-  // Security Check: Block Staff
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
-  if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') {
-    throw new Error("Security Violation: Staff members are not permitted to delete financial records.");
+  if (!profile?.business_id) throw new Error("No business found");
+
+  if (profile.role !== 'business_owner' && profile.role !== 'super_admin') {
+    throw new Error("Security Violation: Only Business Owners can void a posted income record.");
   }
 
+  const id = formData.get("id") as string;
+  // Capture the mandatory void reason passed from the UI
+  const voidReason = formData.get("void_reason") as string || "Owner forced deletion.";
+
   // Fetch record for the Audit Trail BEFORE deleting
-  const { data: targetRecord } = await supabase.from("income").select("*").eq("id", id).single();
+  const { data: targetRecord } = await supabase.from("income").select("amount, description, customers(name)").eq("id", id).single();
+  
+  // THE FIX: Safely cast the relational data to 'any' to bypass TS 'never' inference
+  const customersData = targetRecord?.customers as any;
+  const clientName = Array.isArray(customersData) ? customersData[0]?.name : customersData?.name;
 
   const { error } = await supabase.from("income").delete().eq("id", id).eq("business_id", profile.business_id);
   if (error) throw new Error(error.message);
 
-  // --- TRIGGER SECURITY TRIPWIRE ---
+  // RICH AUDIT LOGGING (Non-Repudiation)
   await logSecurityEvent({
-    businessId: profile.business_id,
-    actorId: user.id,
-    action: "DELETED_INCOME",
-    tableName: "income",
-    recordId: id,
-    details: { amount: targetRecord?.amount, description: targetRecord?.description }
+    businessId: profile.business_id as string, actorId: user.id, action: "DELETED_INCOME", tableName: "income", recordId: id,
+    details: { client_name: clientName || 'Walk-in', voided_amount: targetRecord?.amount, notes: targetRecord?.description, reason: voidReason }
   });
 
   revalidatePath("/income");

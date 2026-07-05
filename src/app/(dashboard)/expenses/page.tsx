@@ -1,6 +1,6 @@
 // src/app/(dashboard)/expenses/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { createExpense, deleteExpense } from "@/features/expenses/actions";
+import { createExpense } from "@/features/expenses/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,9 @@ import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
 import { Paperclip, Camera, Upload } from "lucide-react"; 
 
+// THE FIX: Import our new Security Gates
+import { ExpenseEditInterceptor, ExpenseDeleteDialog } from "./ExpenseActionDialogs";
+
 export default async function ExpensesPage(props: { 
   searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
 }) {
@@ -18,9 +21,6 @@ export default async function ExpensesPage(props: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // ============================================================================
-  // 1. THE GATEKEEPER: Get Profile, Role & Business Features
-  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id, role, businesses(currency, allow_receipt_uploads)") 
@@ -31,23 +31,18 @@ export default async function ExpensesPage(props: {
   const currency = bizData?.currency || "PHP";
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
   
-  // Evaluates to true UNLESS explicitly set to false by the Super Admin
   const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
 
-  // 2. Fetch Accounts
   const { data: accounts } = await supabase
     .from("accounts")
     .select("id, name, type")
     .eq("business_id", profile?.business_id)
-    .in("type", ["asset", "expense"]) 
+    .in("type", ["asset", "expense", "liability"]) 
     .order("name");
 
-  const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
+  const bankAccounts = accounts?.filter(a => a.type === "asset" || a.type === "liability") || [];
   const expenseCategories = accounts?.filter(a => a.type === "expense") || [];
 
-  // ============================================================================
-  // 3. THE TEMPORAL BRIDGE
-  // ============================================================================
   let startDate = params?.from || null;
   let endDate = params?.to || null;
 
@@ -65,9 +60,6 @@ export default async function ExpensesPage(props: {
     }
   }
 
-  // ============================================================================
-  // 4. BUILD DYNAMIC SEARCH & FILTER QUERY
-  // ============================================================================
   let query = supabase
     .from("expenses")
     .select(`
@@ -97,7 +89,6 @@ export default async function ExpensesPage(props: {
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
-        {/* CREATE FORM */}
         <div className="lg:col-span-1">
           <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
             <CardHeader>
@@ -156,9 +147,6 @@ export default async function ExpensesPage(props: {
                   <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-16" required />
                 </div>
 
-                {/* ============================================================================ */}
-                {/* THE SAAS FEATURE GATE: CONDITIONAL RENDER */}
-                {/* ============================================================================ */}
                 {canUploadReceipts ? (
                   <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
                     <div className="flex items-center gap-2 mb-1">
@@ -180,7 +168,6 @@ export default async function ExpensesPage(props: {
                       Click below to select a scanned image or PDF from your computer.
                     </p>
                     
-                    {/* STRICT MIME TYPES: Only JPG, PNG, and PDF allowed */}
                     <Input 
                       id="receipt" 
                       name="receipt" 
@@ -190,7 +177,6 @@ export default async function ExpensesPage(props: {
                     />
                   </div>
                 ) : (
-                  /* THE LOCKED UPSELL UI */
                   <div className="space-y-3 p-4 bg-neutral-50 rounded-lg border border-neutral-200 relative overflow-hidden flex flex-col items-center text-center">
                     <div className="absolute top-0 right-0 p-3 opacity-5 text-4xl pointer-events-none">🔒</div>
                     <div className="p-2 bg-neutral-200 text-neutral-500 rounded-full mb-1">
@@ -207,7 +193,6 @@ export default async function ExpensesPage(props: {
                     </Button>
                   </div>
                 )}
-                {/* ============================================================================ */}
 
                 <SubmitButton 
                   title="Record Expense" 
@@ -219,7 +204,6 @@ export default async function ExpensesPage(props: {
           </Card>
         </div>
 
-        {/* RIGHT COLUMN: FILTER & TABLE */}
         <div className="lg:col-span-2 space-y-4">
           
           <Card className="shadow-sm border-neutral-200 bg-white">
@@ -270,50 +254,55 @@ export default async function ExpensesPage(props: {
                     </td>
                   </tr>
                 ) : (
-                  (expenseRecords as any[]).map((exp) => (
-                    <tr key={exp.id} className="hover:bg-neutral-50 group transition-colors">
-                      <td className="px-4 py-4 text-neutral-500">{new Date(exp.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-4">
-                        <p className="font-medium text-neutral-900">{exp.vendors?.name || 'Unknown Vendor'}</p>
-                        <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[150px] lg:max-w-[200px]">{exp.description}</p>
-                        
-                        {exp.receipt_url && (
-                          <a 
-                            href={exp.receipt_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded text-[10px] font-medium transition-colors"
-                          >
-                            <Paperclip size={10} /> View Document
-                          </a>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-neutral-600">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 border border-neutral-200">
-                          {exp.accounts?.name || 'Uncategorized'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-right font-medium text-neutral-900">
-                        -{formatCurrency(Number(exp.amount))}
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Link href={`/expenses/${exp.id}/edit`}>
-                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
-                          </Link>
-                          {isOwner && (
-                            <form action={async (formData) => {
-                              "use server";
-                              await deleteExpense(formData);
-                            }}>
-                              <input type="hidden" name="id" value={exp.id} />
-                              <Button type="submit" variant="destructive" size="sm" className="h-8 px-3 text-xs">Delete</Button>
-                            </form>
+                  (expenseRecords as any[]).map((exp) => {
+                    const vendorName = exp.vendors?.name || 'Unknown Vendor';
+
+                    return (
+                      <tr key={exp.id} className="hover:bg-neutral-50 group transition-colors">
+                        <td className="px-4 py-4 text-neutral-500">{new Date(exp.date).toLocaleDateString()}</td>
+                        <td className="px-4 py-4">
+                          <p className="font-medium text-neutral-900">{vendorName}</p>
+                          <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[150px] lg:max-w-[200px]">{exp.description}</p>
+                          
+                          {exp.receipt_url && (
+                            <a 
+                              href={exp.receipt_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 bg-blue-50 text-blue-600 hover:text-white hover:bg-blue-600 border border-blue-200 rounded text-[10px] font-medium transition-colors"
+                            >
+                              <Paperclip size={10} /> View Document
+                            </a>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-4 py-4 text-neutral-600">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 border border-neutral-200">
+                            {exp.accounts?.name || 'Uncategorized'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-right font-medium text-neutral-900">
+                          -{formatCurrency(Number(exp.amount))}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          
+                          {/* THE FIX: Absolute Discoverability - No hover constraints! */}
+                          <div className="flex items-center justify-center gap-2">
+                            
+                            <ExpenseEditInterceptor targetUrl={`/expenses/${exp.id}/edit`} />
+                            
+                            {isOwner && (
+                              <ExpenseDeleteDialog 
+                                expenseId={exp.id} 
+                                amount={exp.amount} 
+                                vendorName={vendorName} 
+                              />
+                            )}
+
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -1,6 +1,6 @@
 // src/app/(dashboard)/income/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { createIncome, deleteIncome } from "@/features/income/actions";
+import { createIncome } from "@/features/income/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,17 +10,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
 
-// THE FIX: Added month and year to the expected searchParams Promise
+// Importing our custom Security Gates!
+import { IncomeEditInterceptor, IncomeDeleteDialog } from "./IncomeActionDialogs";
+
 export default async function IncomePage(props: { 
   searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
 }) {
-  // Resolve URL Search Parameters for filtering
   const params = await props.searchParams;
   
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Get Business Profile, Role & Currency
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id, role, businesses(business_name, currency)")
@@ -30,10 +30,8 @@ export default async function IncomePage(props: {
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
   
-  // Security Role Check: Owners can delete. Staff cannot.
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // 2. Fetch Assets & Revenue Accounts
   const { data: accounts } = await supabase
     .from("accounts")
     .select("id, name, type")
@@ -44,35 +42,24 @@ export default async function IncomePage(props: {
   const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
   const revenueCategories = accounts?.filter(a => a.type === "revenue") || [];
 
-  // ============================================================================
-  // 3. THE TEMPORAL BRIDGE (Timezone-Agnostic Boundary Calculator)
-  // ============================================================================
-  // Start with manual filters if the user typed them into the form
   let startDate = params?.from || null;
   let endDate = params?.to || null;
 
-  // If no manual filters, check if the Dashboard handed us a Month/Year
   if (!startDate && !endDate && params?.year) {
     const yearStr = params.year;
     
     if (params?.month && params.month !== 'all') {
-      // Create exact YYYY-MM-DD strings to avoid NodeJS Timezone drift
       const monthStr = params.month.padStart(2, '0');
-      // Day 0 of the *next* month magically gives us the last day of the *current* month
       const lastDay = new Date(Number(yearStr), Number(params.month), 0).getDate();
       
       startDate = `${yearStr}-${monthStr}-01`;
       endDate = `${yearStr}-${monthStr}-${lastDay}T23:59:59.999`;
     } else {
-      // "All Year" selected
       startDate = `${yearStr}-01-01`;
       endDate = `${yearStr}-12-31T23:59:59.999`;
     }
   }
 
-  // ============================================================================
-  // 4. BUILD THE SEARCH & FILTER QUERY
-  // ============================================================================
   let query = supabase
     .from("income")
     .select(`
@@ -83,16 +70,13 @@ export default async function IncomePage(props: {
     .eq("business_id", profile?.business_id)
     .order("date", { ascending: false });
 
-  // Apply Search Parameter filters to the Query
   if (params?.search) {
     query = query.ilike("description", `%${params.search}%`); 
   }
   
-  // Inject the calculated absolute string boundaries into Postgres
   if (startDate) query = query.gte("date", startDate);
   if (endDate) query = query.lte("date", endDate);
 
-  // Execute the query!
   const { data: incomeRecords } = await query;
 
   const formatCurrency = (amount: number) => {
@@ -108,7 +92,6 @@ export default async function IncomePage(props: {
 
       <div className="grid gap-8 md:grid-cols-3">
         
-        {/* LOG INCOME FORM */}
         <div className="md:col-span-1">
           <Card className="shadow-sm border-neutral-200 sticky top-8">
             <CardHeader>
@@ -190,10 +173,8 @@ export default async function IncomePage(props: {
           </Card>
         </div>
 
-        {/* RIGHT COLUMN: FILTER & DATA TABLE */}
         <div className="md:col-span-2 space-y-4">
           
-          {/* THE SEARCH AND FILTER BAR */}
           <Card className="shadow-sm border-neutral-200 bg-white">
             <CardContent className="p-4">
               <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
@@ -212,7 +193,6 @@ export default async function IncomePage(props: {
                 <div className="flex gap-2 w-full md:w-auto">
                   <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
                   
-                  {/* THE FIX: Ensure Clear Button appears when dashboard month/year is active */}
                   {(params?.search || params?.from || params?.to || params?.month || params?.year) && (
                     <Link href="/income">
                       <Button variant="outline" className="text-neutral-500">Clear</Button>
@@ -223,7 +203,6 @@ export default async function IncomePage(props: {
             </CardContent>
           </Card>
 
-          {/* INCOME DATA TABLE */}
           <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-[600px]">
               <thead className="bg-neutral-50 border-b border-neutral-200">
@@ -243,53 +222,50 @@ export default async function IncomePage(props: {
                     </td>
                   </tr>
                 ) : (
-                  (incomeRecords as any[]).map((inc) => (
-                    <tr key={inc.id} className="hover:bg-neutral-50 group transition-colors">
-                      <td className="px-4 py-4 text-neutral-500">
-                        {new Date(inc.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className="font-medium text-neutral-900">{inc.customers?.name || 'Walk-in'}</p>
-                        <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[200px]">{inc.description}</p>
-                        {inc.reference_number && (
-                          <span className="block text-xs text-neutral-400 font-mono mt-0.5">Ref: {inc.reference_number}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-neutral-600">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                          {inc.accounts?.name || 'Uncategorized'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-right font-medium text-green-600">
-                        +{formatCurrency(Number(inc.amount))}
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                          
-                          {/* EDIT BUTTON (Available to Everyone) */}
-                          <Link href={`/income/${inc.id}/edit`}>
-                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">
-                              Edit
-                            </Button>
-                          </Link>
-
-                          {/* DELETE BUTTON (RESTRICTED TO OWNER) */}
-                          {isOwner && (
-                            <form action={async (formData) => {
-                              "use server";
-                              await deleteIncome(formData);
-                            }}>
-                              <input type="hidden" name="id" value={inc.id} />
-                              <Button type="submit" variant="destructive" size="sm" className="h-8 px-3 text-xs">
-                                Delete
-                              </Button>
-                            </form>
+                  (incomeRecords as any[]).map((inc) => {
+                    const clientName = inc.customers?.name || 'Walk-in';
+                    
+                    return (
+                      <tr key={inc.id} className="hover:bg-neutral-50 group transition-colors">
+                        <td className="px-4 py-4 text-neutral-500">
+                          {new Date(inc.date).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-4">
+                          <p className="font-medium text-neutral-900">{clientName}</p>
+                          <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[200px]">{inc.description}</p>
+                          {inc.reference_number && (
+                            <span className="block text-xs text-neutral-400 font-mono mt-0.5">Ref: {inc.reference_number}</span>
                           )}
+                        </td>
+                        <td className="px-4 py-4 text-neutral-600">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                            {inc.accounts?.name || 'Uncategorized'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-right font-medium text-green-600">
+                          +{formatCurrency(Number(inc.amount))}
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          
+                          <div className="flex items-center justify-center gap-2">
+                            
+                            {/* Injecting the Secure Edit Interceptor */}
+                            <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
 
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            {/* Injecting the Secure Delete Dialog */}
+                            {isOwner && (
+                              <IncomeDeleteDialog 
+                                incomeId={inc.id} 
+                                amount={inc.amount} 
+                                clientName={clientName} 
+                              />
+                            )}
+
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

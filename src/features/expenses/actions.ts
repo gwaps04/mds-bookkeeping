@@ -18,15 +18,19 @@ export async function createExpense(formData: FormData) {
   const business_id = profile?.business_id;
   
   const vendor_name = formData.get("vendor_name") as string;
-  const amount = formData.get("amount");
-  const date = formData.get("date");
-  const account_id = formData.get("account_id");   
-  const category_id = formData.get("category_id"); 
-  const description = formData.get("description");
-  const reference_number = formData.get("reference_number"); 
+  const amount = parseFloat(formData.get("amount") as string);
+  const date = formData.get("date") as string;
+  const account_id = formData.get("account_id") as string;   
+  const category_id = formData.get("category_id") as string; 
+  const description = formData.get("description") as string;
+  const reference_number = formData.get("reference_number") as string; 
 
-  // THE FIX: Intercept the binary file payload
   const receiptFile = formData.get("receipt") as File | null;
+
+  // MATHEMATICAL SERVER GUARD
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error("Expense amount must be greater than zero.");
+  }
 
   // SMART VENDOR RESOLUTION
   let vendor_id = null;
@@ -48,7 +52,6 @@ export async function createExpense(formData: FormData) {
   let receipt_url = null;
   if (receiptFile && receiptFile.size > 0 && receiptFile.name !== "undefined") {
     const fileExt = receiptFile.name.split('.').pop();
-    // Cryptographic isolation: business_id / random-uuid . ext
     const fileName = `${business_id}/${crypto.randomUUID()}.${fileExt}`;
     
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -76,7 +79,7 @@ export async function createExpense(formData: FormData) {
       date, 
       description, 
       reference_number, 
-      receipt_url, // Injected the URL into the DB!
+      receipt_url,
       created_by: user.id
     }])
     .select("id")
@@ -91,7 +94,7 @@ export async function createExpense(formData: FormData) {
     action: "RECORDED_EXPENSE",
     tableName: "expenses",
     recordId: newExpense.id,
-    details: { amount, vendor_name, description, has_receipt: !!receipt_url }
+    details: { amount_paid: amount, account_name: vendor_name, notes: description, has_receipt: !!receipt_url }
   });
 
   revalidatePath("/expenses");
@@ -112,14 +115,19 @@ export async function updateExpense(formData: FormData) {
 
   const id = formData.get("id") as string;
   const vendor_name = formData.get("vendor_name") as string;
-  const amount = formData.get("amount");
-  const date = formData.get("date");
-  const account_id = formData.get("account_id");
-  const category_id = formData.get("category_id");
-  const description = formData.get("description");
-  const reference_number = formData.get("reference_number");
+  const amount = parseFloat(formData.get("amount") as string);
+  const date = formData.get("date") as string;
+  const account_id = formData.get("account_id") as string;
+  const category_id = formData.get("category_id") as string;
+  const description = formData.get("description") as string;
+  const reference_number = formData.get("reference_number") as string;
+  const editReason = formData.get("edit_reason") as string || "Staff manually edited a posted expense record.";
   
   const receiptFile = formData.get("receipt") as File | null;
+
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error("Expense amount must be greater than zero.");
+  }
 
   const { data: oldRecord } = await supabase.from("expenses").select("*").eq("id", id).single();
 
@@ -139,7 +147,7 @@ export async function updateExpense(formData: FormData) {
     }
   }
 
-  // BINARY STORAGE ENGINE (Keep old URL unless a new file is uploaded)
+  // BINARY STORAGE ENGINE
   let receipt_url = oldRecord?.receipt_url;
   if (receiptFile && receiptFile.size > 0 && receiptFile.name !== "undefined") {
     const fileExt = receiptFile.name.split('.').pop();
@@ -161,14 +169,7 @@ export async function updateExpense(formData: FormData) {
   const { error } = await supabase
     .from("expenses")
     .update({ 
-      vendor_id, 
-      account_id, 
-      category_id, 
-      amount, 
-      date, 
-      description, 
-      reference_number,
-      receipt_url 
+      vendor_id, account_id, category_id, amount, date, description, reference_number, receipt_url 
     })
     .eq("id", id).eq("business_id", business_id);
 
@@ -183,7 +184,8 @@ export async function updateExpense(formData: FormData) {
     recordId: id,
     details: { 
       previous: { amount: oldRecord?.amount, description: oldRecord?.description },
-      new: { amount, description, vendor_name, has_receipt: !!receipt_url } 
+      new: { amount, description, vendor_name, has_receipt: !!receipt_url },
+      reason: editReason
     }
   });
 
@@ -202,38 +204,37 @@ export async function deleteExpense(formData: FormData) {
   if (!user) throw new Error("Unauthorized");
 
   const id = formData.get("id") as string;
+  const voidReason = formData.get("void_reason") as string || "Owner forced deletion.";
 
-  // Security Check: Block Staff
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
   if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') {
     throw new Error("Security Violation: Staff members are not permitted to delete financial records.");
   }
 
-  const { data: targetRecord } = await supabase.from("expenses").select("*").eq("id", id).single();
+  const { data: targetRecord } = await supabase.from("expenses").select("amount, description, receipt_url, vendors(name)").eq("id", id).single();
   
-  // OPTIONAL: Delete the physical file from the bucket if we want to save space
+  // TYPESCRIPT SAFE CASTING
+  const vendorData = targetRecord?.vendors as any;
+  const vendorName = Array.isArray(vendorData) ? vendorData[0]?.name : vendorData?.name;
+  
   if (targetRecord?.receipt_url) {
-    // Extract the filename from the URL (everything after "receipts/")
     const urlParts = targetRecord.receipt_url.split('/receipts/');
     if (urlParts.length > 1) {
-      const filePath = urlParts[1];
-      // Fire and forget (don't await) so we don't slow down the UI deletion if it fails
-      supabase.storage.from('receipts').remove([filePath]);
+      supabase.storage.from('receipts').remove([urlParts[1]]);
     }
   }
 
   const { error } = await supabase.from("expenses").delete().eq("id", id).eq("business_id", profile.business_id);
-  
   if (error) throw new Error(error.message);
 
   // TRIGGER SECURITY TRIPWIRE
   await logSecurityEvent({
-    businessId: profile.business_id,
+    businessId: profile.business_id as string,
     actorId: user.id,
     action: "DELETED_EXPENSE",
     tableName: "expenses",
     recordId: id,
-    details: { amount: targetRecord?.amount, description: targetRecord?.description }
+    details: { account_name: vendorName || 'General Payee', voided_amount: targetRecord?.amount, notes: targetRecord?.description, reason: voidReason }
   });
 
   revalidatePath("/expenses");
