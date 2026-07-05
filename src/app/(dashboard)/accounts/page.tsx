@@ -1,20 +1,22 @@
 // src/app/(dashboard)/accounts/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { createAccount, deleteAccount } from "@/features/accounts/actions";
+import { restoreAccount } from "@/features/accounts/actions"; 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import SubmitButton from "@/components/SubmitButton";
 import Link from "next/link";
+import CreateAccountForm from "./CreateAccountForm"; 
+import ArchiveAccountDialog from "./ArchiveAccountDialog"; // THE SMART INTERCEPTOR
+import SubmitButton from "@/components/SubmitButton"; 
+import { ArchiveRestore } from "lucide-react"; 
 
-export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string }> }) {
+export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string, view?: string }> }) {
   const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. FETCH THE PROFILE + THE NEW BUSINESS SETTING
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id, role, businesses(allow_staff_account_creation)")
@@ -25,14 +27,15 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
   const role = profile?.role;
   const isOwner = role === 'business_owner' || role === 'super_admin';
 
-  // 2. SET UP THE DYNAMIC RBAC LOGIC
   const businessData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const allowAccountCreation = businessData?.allow_staff_account_creation ?? true;
-  
-  // The master toggle for account modification
   const canCreateAccount = isOwner || (role === 'staff' && allowAccountCreation);
 
-  // BUILD SEARCH & FILTER QUERY
+  const isArchiveView = params?.view === 'archived';
+
+  // ============================================================================
+  // THE GATEKEEPER: Dynamic Archive / Active Querying
+  // ============================================================================
   let query = supabase
     .from("accounts")
     .select("*")
@@ -40,84 +43,48 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
     .order("type", { ascending: true })
     .order("name", { ascending: true });
 
+  if (isArchiveView) {
+    query = query.eq("is_archived", true);
+  } else {
+    query = query.neq("is_archived", true); 
+  }
+
   if (params?.search) query = query.ilike("name", `%${params.search}%`);
   if (params?.type && params.type !== "all") query = query.eq("type", params.type);
 
   const { data: accounts } = await query;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Chart of Accounts</h2>
-          <p className="text-neutral-500 mt-1">Manage your banks, cash accounts, and ledger categories.</p>
+          <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-neutral-900">Chart of Accounts</h2>
+          <p className="text-sm md:text-base text-neutral-500 mt-1">Manage your banks, cash accounts, and ledger categories.</p>
         </div>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-3">
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
-        {/* LEFT COLUMN: ADD ACCOUNT FORM (CONTROLLED BY DYNAMIC RBAC) */}
-        <div className="md:col-span-1">
+        <div className="lg:col-span-1">
           {canCreateAccount ? (
-            <Card className="shadow-sm border-neutral-200 sticky top-8">
+            <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
               <CardHeader>
                 <CardTitle className="text-lg">Add New Account</CardTitle>
                 <CardDescription>Expand your financial ledger structure.</CardDescription>
               </CardHeader>
               <CardContent>
-                <form action={async (formData) => {
-                  "use server";
-                  await createAccount(formData);
-                }} className="space-y-4">
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Account Name</Label>
-                    <Input id="name" name="name" placeholder="e.g. BDO Checking, Marketing Exp" required />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="type">Financial Type</Label>
-                    <Select name="type" required>
-                      <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asset">Asset (Banks/Cash)</SelectItem>
-                        <SelectItem value="revenue">Revenue (Income)</SelectItem>
-                        <SelectItem value="expense">Expense (Outflows)</SelectItem>
-                        <SelectItem value="liability">Liability (Loans/Payables)</SelectItem>
-                        <SelectItem value="equity">Equity</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="category">Sub-Category (Optional)</Label>
-                    <Input id="category" name="category" placeholder="e.g. Current Asset, Utility" />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="account_number">Bank / Account No. (Optional)</Label>
-                    <Input id="account_number" name="account_number" placeholder="e.g. 1010, 0001-2345" />
-                  </div>
-
-                  <div className="pt-2">
-                    <SubmitButton 
-                      title="Create Account" 
-                      loadingTitle="Creating..." 
-                      className="w-full bg-blue-600 text-white hover:bg-blue-700" 
-                    />
-                  </div>
-                </form>
+                <CreateAccountForm />
               </CardContent>
             </Card>
           ) : (
-            <Card className="shadow-sm border-neutral-200 sticky top-8">
+            <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
               <CardHeader>
                 <CardTitle className="text-lg">Structural Controls</CardTitle>
                 <CardDescription>Account creation is restricted.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="p-4 bg-blue-50 border border-blue-100 rounded-md text-sm text-blue-800">
+                <div className="p-4 bg-blue-50 border border-blue-100 rounded-md text-sm text-blue-800 leading-relaxed">
                   <span className="font-bold block mb-1">Access Restricted:</span>
                   Only Business Owners have permission to modify the structural Chart of Accounts. Please contact your administrator to add new banks or categories.
                 </div>
@@ -126,18 +93,28 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
           )}
         </div>
 
-        {/* RIGHT COLUMN: FILTERS & TABLE */}
-        <div className="md:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4">
           
-          {/* SEARCH & FILTER BAR */}
           <Card className="shadow-sm border-neutral-200 bg-white">
             <CardContent className="p-4">
-              <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
+              <form method="GET" className="flex flex-col md:flex-row gap-3 md:items-end">
                 <div className="flex-1 w-full space-y-1">
                   <Label className="text-xs text-neutral-500">Search Accounts</Label>
                   <Input name="search" placeholder="Search by name..." defaultValue={params?.search} />
                 </div>
-                <div className="w-full md:w-48 space-y-1">
+                
+                <div className="w-full md:w-32 space-y-1">
+                  <Label className="text-xs text-neutral-500">Status</Label>
+                  <Select name="view" defaultValue={params?.view || "active"}>
+                    <SelectTrigger><SelectValue placeholder="Active" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="w-full md:w-40 space-y-1">
                   <Label className="text-xs text-neutral-500">Filter by Type</Label>
                   <Select name="type" defaultValue={params?.type || "all"}>
                     <SelectTrigger><SelectValue placeholder="All Types" /></SelectTrigger>
@@ -151,17 +128,26 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
-                  {(params?.search || params?.type) && (
-                    <Link href="/accounts"><Button variant="outline" className="text-neutral-500">Clear</Button></Link>
+                
+                <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
+                  <Button type="submit" className="bg-neutral-900 text-white flex-1 md:flex-none">Filter</Button>
+                  {(params?.search || params?.type || params?.view) && (
+                    <Link href="/accounts" className="flex-1 md:flex-none">
+                      <Button variant="outline" className="text-neutral-500 w-full">Clear</Button>
+                    </Link>
                   )}
                 </div>
               </form>
             </CardContent>
           </Card>
 
-          {/* ACCOUNTS DATA TABLE */}
+          {isArchiveView && (
+            <div className="bg-amber-50 border border-amber-200 rounded-md p-3 flex items-center gap-2 text-amber-800 text-sm">
+              <ArchiveRestore size={16} />
+              <p>You are viewing <strong>Archived Accounts</strong>. These are hidden from daily ledgers but retain their transaction history.</p>
+            </div>
+          )}
+
           <Card className="shadow-sm border-neutral-200">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -176,11 +162,13 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                   <tbody className="divide-y divide-neutral-200">
                     {(!accounts || accounts.length === 0) ? (
                       <tr>
-                        <td colSpan={3} className="px-4 py-8 text-center text-neutral-500">No accounts found.</td>
+                        <td colSpan={3} className="px-4 py-8 text-center text-neutral-500">
+                          {isArchiveView ? "No archived accounts found." : "No active accounts found."}
+                        </td>
                       </tr>
                     ) : (
                       accounts.map((acc) => (
-                        <tr key={acc.id} className="hover:bg-neutral-50 group transition-colors">
+                        <tr key={acc.id} className={`hover:bg-neutral-50 transition-colors ${isArchiveView ? 'opacity-75 grayscale' : ''}`}>
                           <td className="px-4 py-4">
                             <p className="font-bold text-neutral-900">{acc.name}</p>
                             {acc.account_number && <p className="text-xs text-neutral-500 font-mono mt-0.5">Acc No: {acc.account_number}</p>}
@@ -192,24 +180,33 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                             <span className="text-neutral-500 text-xs">{acc.category}</span>
                           </td>
                           <td className="px-4 py-4 text-center">
-                            <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center justify-center gap-2">
                               
-                              {/* EDIT BUTTON (Visible to those who can create) */}
                               {canCreateAccount && (
-                                <Link href={`/accounts/${acc.id}/edit`}>
-                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
-                                </Link>
-                              )}
-
-                              {/* DELETE BUTTON (Visible to those who can create) */}
-                              {canCreateAccount && (
-                                <form action={async (formData) => {
-                                  "use server";
-                                  await deleteAccount(formData);
-                                }}>
-                                  <input type="hidden" name="id" value={acc.id} />
-                                  <Button type="submit" variant="destructive" size="sm" className="h-8 px-3 text-xs">Delete</Button>
-                                </form>
+                                isArchiveView ? (
+                                  /* THE RESTORE BUTTON UI */
+                                  <form action={async (formData) => {
+                                    "use server";
+                                    try { await restoreAccount(formData); } catch (e) { console.error(e); }
+                                  }}>
+                                    <input type="hidden" name="id" value={acc.id} />
+                                    <SubmitButton 
+                                      title="Restore Account" 
+                                      loadingTitle="Restoring..." 
+                                      className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm" 
+                                    />
+                                  </form>
+                                ) : (
+                                  /* THE NORMAL EDIT & SMART ARCHIVE UI */
+                                  <>
+                                    <Link href={`/accounts/${acc.id}/edit`}>
+                                      <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
+                                    </Link>
+                                    
+                                    {/* THE NEW MODAL INTERCEPTOR */}
+                                    <ArchiveAccountDialog accountId={acc.id} accountName={acc.name} />
+                                  </>
+                                )
                               )}
 
                             </div>

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, use } from "react";
 import { createClient } from "@/lib/supabase/client"; 
-import { recordInvoicePayment } from "@/features/invoices/actions";
+import { recordInvoicePayment, resolvePaymentVoid } from "@/features/invoices/actions"; 
 import { processRefundRequest } from "@/features/refunds/actions"; 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import SubmitButton from "@/components/SubmitButton";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DownloadPDFButton } from "@/features/invoices/components/DownloadPDFButton";
+import SecureRouteInterceptor from "./SecureRouteInterceptor";
+import EditPaymentDialog from "./EditPaymentDialog";
 
 export default function ViewInvoicePage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
@@ -22,6 +24,7 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
   
   const [invoice, setInvoice] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
+  const [voidRequests, setVoidRequests] = useState<any[]>([]); 
   const [refundRequests, setRefundRequests] = useState<any[]>([]);
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
   const [businessName, setBusinessName] = useState("");
@@ -29,6 +32,7 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
   const [userRole, setUserRole] = useState("");
   const [allowStaffPayment, setAllowStaffPayment] = useState(true);
   const [allowStaffRefund, setAllowStaffRefund] = useState(true);
+  const [allowStaffVoid, setAllowStaffVoid] = useState(true); // THE NEW STATE
   
   const [displayAmount, setDisplayAmount] = useState("");
   const [rawAmount, setRawAmount] = useState(0);
@@ -42,19 +46,24 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // THE FIX: Fetching the new allow_staff_void_request column
       const { data: profile } = await supabase
         .from("profiles")
-        .select("business_id, role, businesses(business_name, allow_staff_payment_logging, allow_staff_refund_request)")
+        .select("business_id, role, businesses(business_name, allow_staff_payment_logging, allow_staff_refund_request, allow_staff_void_request)")
         .eq("id", user.id)
         .single();
         
       const bId = profile?.business_id;
       const businessesData = profile?.businesses as any;
+      const currentBusiness = Array.isArray(businessesData) ? businessesData[0] : businessesData;
       
       setUserRole(profile?.role || "");
-      setBusinessName(Array.isArray(businessesData) ? businessesData[0]?.business_name : businessesData?.business_name);
-      setAllowStaffPayment(Array.isArray(businessesData) ? businessesData[0]?.allow_staff_payment_logging : businessesData?.allow_staff_payment_logging);
-      setAllowStaffRefund(Array.isArray(businessesData) ? businessesData[0]?.allow_staff_refund_request ?? true : businessesData?.allow_staff_refund_request ?? true);
+      setBusinessName(currentBusiness?.business_name);
+      setAllowStaffPayment(currentBusiness?.allow_staff_payment_logging ?? true);
+      setAllowStaffRefund(currentBusiness?.allow_staff_refund_request ?? true);
+      
+      // THE FIX: Setting the Void Toggle
+      setAllowStaffVoid(currentBusiness?.allow_staff_void_request ?? true); 
 
       const { data: inv } = await supabase.from("invoices").select(`*, invoice_items(*)`).eq("id", params.id).eq("business_id", bId).single();
       if (!inv) return router.push("/invoices");
@@ -62,6 +71,9 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
 
       const { data: pays } = await supabase.from("income").select("id, amount, date, reference_number, description").eq("invoice_id", params.id).order("date", { ascending: false });
       setPayments(pays || []);
+
+      const { data: voids } = await supabase.from("payment_void_requests").select("*").eq("invoice_id", params.id).order("created_at", { ascending: false });
+      setVoidRequests(voids || []);
 
       const { data: refs } = await supabase.from("refund_requests").select("*").eq("invoice_id", params.id).order("created_at", { ascending: false });
       setRefundRequests(refs || []);
@@ -104,12 +116,15 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
           <Button variant="outline" size="sm" className="bg-white text-neutral-600">&larr; Back to Ledger</Button>
         </Link>
         <div className="flex gap-2">
-          <Link href={`/invoices/${invoice.id}/edit`}>
-            <Button variant="outline" size="sm" className="bg-white text-blue-600 border-blue-200">Edit Invoice</Button>
-          </Link>
+          
+          <SecureRouteInterceptor 
+            targetUrl={`/invoices/${invoice.id}/edit`}
+            trigger={
+              <Button variant="outline" size="sm" className="bg-white text-blue-600 border-blue-200">Edit Invoice</Button>
+            }
+          />
           
           <div className="[&>button]:bg-neutral-900 [&>button]:text-white [&>button:hover]:bg-neutral-800 [&>button]:border-none">
-            {/* DATA INJECTION: Passing payments and approved refunds down to the PDF engine */}
             <DownloadPDFButton 
               invoice={invoice} 
               items={invoice.invoice_items || []} 
@@ -244,15 +259,68 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
                 <p className="text-sm text-neutral-500 italic text-center py-4">No payments linked to this invoice.</p>
               ) : (
                 <div className="space-y-4">
-                  {payments.map((payment: any) => (
-                    <div key={payment.id} className="flex justify-between items-center bg-green-50/50 p-3 rounded border border-green-100">
-                      <div>
-                        <p className="text-xs font-bold text-green-800">{new Date(payment.date).toLocaleDateString()}</p>
-                        <p className="text-[10px] text-green-600 uppercase tracking-wider">{payment.description ? payment.description : "CASH / BANK RECEIPT"}</p>
+                  {payments.map((payment: any) => {
+                    const pendingVoid = voidRequests.find(v => v.payment_id === payment.id && v.status === 'pending');
+
+                    return (
+                      <div key={payment.id} className="flex flex-col gap-2 mb-4">
+                        <div className={`flex justify-between items-center p-3 rounded border group ${pendingVoid ? 'bg-red-50/30 border-red-200' : 'bg-green-50/50 border-green-100'}`}>
+                          <div>
+                            <p className={`text-xs font-bold ${pendingVoid ? 'text-red-800' : 'text-green-800'}`}>{new Date(payment.date).toLocaleDateString()}</p>
+                            <p className={`text-[10px] uppercase tracking-wider ${pendingVoid ? 'text-red-600' : 'text-green-600'}`}>{payment.description ? payment.description : "CASH / BANK RECEIPT"}</p>
+                          </div>
+                          
+                          <div className="flex items-center gap-3">
+                            <p className={`font-bold ${pendingVoid ? 'text-red-700 line-through opacity-70' : 'text-green-700'}`}>+₱{Number(payment.amount).toLocaleString('en-US')}</p>
+                            
+                            {pendingVoid ? (
+                              <span className="text-[9px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold uppercase tracking-wider">Void Pending</span>
+                            ) : (
+                              (isOwner || allowStaffPayment) && (
+                                /* THE FIX: Injecting the new allowStaffVoid prop down to the child component */
+                                <EditPaymentDialog 
+                                  payment={payment} 
+                                  invoiceId={invoice.id} 
+                                  clientName={invoice.client_name} 
+                                  userRole={userRole} 
+                                  allowStaffVoid={allowStaffVoid} 
+                                />
+                              )
+                            )}
+                          </div>
+                        </div>
+
+                        {pendingVoid && isOwner && (
+                          <div className="bg-red-50 p-3 ml-4 rounded-md border border-red-200 flex flex-col xl:flex-row xl:justify-between xl:items-center gap-3 animate-in fade-in slide-in-from-top-1">
+                            <div>
+                              <p className="text-[11px] font-bold text-red-800 uppercase tracking-wider">Staff Void Request</p>
+                              <p className="text-xs text-red-700 mt-0.5"><span className="font-semibold text-red-900">Reason:</span> {pendingVoid.reason}</p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <form action={async () => {
+                                try {
+                                  const fd = new FormData(); fd.append("request_id", pendingVoid.id); fd.append("action", "reject");
+                                  await resolvePaymentVoid(fd); window.location.reload();
+                                } catch (e: any) { alert(e.message); }
+                              }}>
+                                <Button size="sm" variant="outline" className="h-7 text-xs bg-white text-red-600 border-red-200 hover:bg-red-100">Reject</Button>
+                              </form>
+                              
+                              <form action={async () => {
+                                try {
+                                  const fd = new FormData(); fd.append("request_id", pendingVoid.id); fd.append("action", "approve");
+                                  await resolvePaymentVoid(fd); window.location.reload();
+                                } catch (e: any) { alert(e.message); }
+                              }}>
+                                <Button size="sm" className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white shadow-sm">Approve Void</Button>
+                              </form>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <p className="font-bold text-green-700">+₱{Number(payment.amount).toLocaleString('en-US')}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
+
                   {refundRequests.map((refund: any) => (
                     <div key={refund.id} className={`flex justify-between items-center p-3 rounded border ${refund.status === 'pending' ? 'bg-amber-50/50 border-amber-100' : 'bg-orange-50/50 border-orange-100'}`}>
                       <div>

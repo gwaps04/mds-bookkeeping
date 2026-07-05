@@ -27,7 +27,8 @@ export default async function SettingsPage() {
     const is_tax_registered = formData.get("is_tax_registered") === "on";
     const allow_staff_payment_logging = formData.get("allow_staff_payment_logging") === "on";
     const allow_staff_account_creation = formData.get("allow_staff_account_creation") === "on";
-    const allow_staff_refund_request = formData.get("allow_staff_refund_request") === "on"; // <-- NEW REFUND TOGGLE
+    const allow_staff_refund_request = formData.get("allow_staff_refund_request") === "on";
+    const allow_staff_void_request = formData.get("allow_staff_void_request") === "on"; // <-- THE NEW TOGGLE
     const tin_number = formData.get("tin_number") as string;
 
     // Dashboard Visibility Configuration
@@ -39,7 +40,8 @@ export default async function SettingsPage() {
       tax_id: tin_number,
       allow_staff_payment_logging,
       allow_staff_account_creation,
-      allow_staff_refund_request, // <-- SAVING NEW TOGGLE
+      allow_staff_refund_request,
+      allow_staff_void_request, // <-- SAVING TO DB
       show_net_cash_to_staff,
       show_taxes_to_staff
     }).eq("id", bId);
@@ -63,7 +65,6 @@ export default async function SettingsPage() {
         <form action={saveSettings} className="space-y-6">
           <input type="hidden" name="business_id" value={business?.id || ''} />
 
-          {/* CARD 1: DASHBOARD VISIBILITY CONTROLS */}
           <Card className="shadow-sm border-neutral-200">
             <CardHeader className="border-b border-neutral-100 pb-4 bg-neutral-50/50">
               <CardTitle className="text-lg">Dashboard Visibility Controls</CardTitle>
@@ -87,7 +88,6 @@ export default async function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* CARD 2: SYSTEM CONFIGURATIONS */}
           <Card className="shadow-sm border-neutral-200">
             <CardHeader className="border-b border-neutral-100 pb-4 bg-neutral-50/50">
               <CardTitle className="text-lg">System Configurations</CardTitle>
@@ -103,12 +103,20 @@ export default async function SettingsPage() {
                 </div>
               </div>
 
-              {/* --- NEW MODULE: REFUND REQUEST CONTROL --- */}
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
                 <input type="checkbox" id="allow_staff_refund_request" name="allow_staff_refund_request" defaultChecked={business?.allow_staff_refund_request ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
                   <Label htmlFor="allow_staff_refund_request" className="font-semibold text-neutral-900 cursor-pointer">Allow Staff to Request Refunds</Label>
                   <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, only Business Owners can view the refund module and process overpayments.</p>
+                </div>
+              </div>
+
+              {/* --- NEW MODULE: VOID REQUEST CONTROL --- */}
+              <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
+                <input type="checkbox" id="allow_staff_void_request" name="allow_staff_void_request" defaultChecked={business?.allow_staff_void_request ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
+                <div>
+                  <Label htmlFor="allow_staff_void_request" className="font-semibold text-neutral-900 cursor-pointer">Allow Staff to Request Payment Voids</Label>
+                  <p className="text-xs text-neutral-500 mt-1 leading-relaxed">If disabled, only Business Owners can void posted payments. Staff will only be able to edit amounts.</p>
                 </div>
               </div>
 
