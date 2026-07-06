@@ -159,7 +159,7 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
 }
 
 // ============================================================================
-// 4. CREATE NEW ORGANIZATION (SaaS Limit & Standing Firewall)
+// 4. CREATE NEW ORGANIZATION (SaaS Limit & Inheritance Engine)
 // ============================================================================
 export async function createOrganization(formData: FormData) {
   const businessName = formData.get("business_name") as string;
@@ -177,49 +177,70 @@ export async function createOrganization(formData: FormData) {
     .eq("id", user.id)
     .single();
 
-  // 2. THE ACCOUNT STANDING GUARD: Check for existing suspensions/delinquencies
-  const { data: badStandingBiz } = await supabase
+  // 2. Fetch all existing businesses to evaluate global portfolio standing
+  const { data: portfolio } = await supabase
     .from("businesses")
-    .select("id, business_name, subscription_status")
-    .eq("owner_id", user.id)
-    .in("subscription_status", ["past_due", "suspended", "canceled"])
-    .limit(1);
+    .select("id, business_name, subscription_status, subscription_tier")
+    .eq("owner_id", user.id);
 
-  if (badStandingBiz && badStandingBiz.length > 0) {
-    const badBiz = badStandingBiz[0];
+  const existingBusinesses = portfolio || [];
+
+  // 3. THE ACCOUNT STANDING GUARD (Blocks expansion if they have unpaid bills)
+  const badStandingBiz = existingBusinesses.find(b => 
+    ["past_due", "suspended", "canceled"].includes(b.subscription_status)
+  );
+
+  if (badStandingBiz) {
     return { 
-      error: `Action Denied: Your organization "${badBiz.business_name}" is currently ${badBiz.subscription_status.toUpperCase()}. You must resolve your billing standing before provisioning new workspaces.` 
+      error: `Action Denied: Your organization "${badStandingBiz.business_name}" is currently ${badStandingBiz.subscription_status.toUpperCase()}. You must resolve your billing standing before provisioning new workspaces.` 
     };
   }
 
-  // 3. THE PLAN LIMIT FIREWALL
-  const { count } = await supabase
-    .from("businesses")
-    .select("*", { count: 'exact', head: true })
-    .eq("owner_id", user.id);
-
+  // 4. THE PLAN LIMIT FIREWALL
   const limit = profile?.max_businesses_limit || 1;
-
-  if (count !== null && count >= limit) {
+  if (existingBusinesses.length >= limit) {
     return { error: `Plan Limit Reached: You are only permitted to manage ${limit} organization(s). Please contact a Super Admin to upgrade your account tier.` };
   }
 
-  // 4. Provision the new workspace
+  // ==========================================================================
+  // 5. SMART STATUS INHERITANCE
+  // ==========================================================================
+  // Check if the owner has ANY active (paid) business in their portfolio
+  const activeBiz = existingBusinesses.find(b => b.subscription_status === 'active');
+  
+  let initialStatus = "trial";
+  let initialTier = "essential";
+  let trialEndsAt: string | null = null;
+
+  if (activeBiz) {
+    // INHERIT ACTIVE PAID STATE: Bypasses the trial and UI locks entirely!
+    initialStatus = "active";
+    initialTier = activeBiz.subscription_tier;
+  } else {
+    // START NEW 15-DAY TRIAL (Fallback for users without an active paid account)
+    const trialDate = new Date();
+    trialDate.setDate(trialDate.getDate() + 15);
+    trialEndsAt = trialDate.toISOString();
+  }
+
+  // 6. Provision the new workspace instantly
   const { data: newBusiness, error: bizError } = await supabase
     .from("businesses")
     .insert({
       owner_id: user.id,
       business_name: businessName,
       currency: currency,
-      status: "active" 
-      // subscription_status implicitly defaults to 'trial' per our DB migration
+      status: "active",
+      subscription_status: initialStatus,
+      subscription_tier: initialTier,
+      trial_ends_at: trialEndsAt 
     })
     .select("id")
     .single();
 
   if (bizError) return { error: bizError.message };
 
-  // 5. Automatically switch the owner to their new workspace
+  // 7. Automatically switch the owner to their new workspace
   await supabase
     .from("profiles")
     .update({ business_id: newBusiness.id })
