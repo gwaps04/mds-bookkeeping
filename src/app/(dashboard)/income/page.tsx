@@ -9,9 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
+import { Lock } from "lucide-react"; // THE FIX: Imported icon for visual feedback
 
 // Importing our custom Security Gates!
 import { IncomeEditInterceptor, IncomeDeleteDialog } from "./IncomeActionDialogs";
+
+// THE FIX: Import the SaaS Engine
+import { getTenantAccessLevel } from "@/lib/subscription";
 
 export default async function IncomePage(props: { 
   searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
@@ -31,6 +35,20 @@ export default async function IncomePage(props: {
   const currency = bizData?.currency || "PHP";
   
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+
+  // ============================================================================
+  // 1. THE SAAS SUBSCRIPTION ENGINE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", profile?.business_id)
+    .single();
+
+  const accessState = getTenantAccessLevel(business);
+  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+
+  // ============================================================================
 
   const { data: accounts } = await supabase
     .from("accounts")
@@ -92,6 +110,7 @@ export default async function IncomePage(props: {
 
       <div className="grid gap-8 md:grid-cols-3">
         
+        {/* CREATE INCOME FORM */}
         <div className="md:col-span-1">
           <Card className="shadow-sm border-neutral-200 sticky top-8">
             <CardHeader>
@@ -106,23 +125,23 @@ export default async function IncomePage(props: {
                 
                 <div className="space-y-2">
                   <Label htmlFor="customer_name">Customer / Client</Label>
-                  <Input id="customer_name" name="customer_name" placeholder="e.g. Juan Dela Cruz, Walk-in" required />
+                  <Input id="customer_name" name="customer_name" placeholder="e.g. Juan Dela Cruz, Walk-in" required disabled={isLocked} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="amount">Amount</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required />
+                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required disabled={isLocked} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="date">Date</Label>
-                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required />
+                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required disabled={isLocked} />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="category_id">Revenue Category</Label>
-                  <Select name="category_id" required>
+                  <Select name="category_id" required disabled={isLocked}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select category..." />
                     </SelectTrigger>
@@ -136,7 +155,7 @@ export default async function IncomePage(props: {
 
                 <div className="space-y-2">
                   <Label htmlFor="account_id">Deposit To (Bank / Cash)</Label>
-                  <Select name="account_id" required>
+                  <Select name="account_id" required disabled={isLocked}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select account..." />
                     </SelectTrigger>
@@ -150,7 +169,7 @@ export default async function IncomePage(props: {
 
                 <div className="space-y-2">
                   <Label htmlFor="reference_number">Reference Number (Optional)</Label>
-                  <Input id="reference_number" name="reference_number" placeholder="e.g. GCash Ref, Check No." />
+                  <Input id="reference_number" name="reference_number" placeholder="e.g. GCash Ref, Check No." disabled={isLocked} />
                 </div>
 
                 <div className="space-y-2">
@@ -160,14 +179,22 @@ export default async function IncomePage(props: {
                     name="description" 
                     placeholder="Provide details about this sale..." 
                     className="resize-none h-20"
+                    disabled={isLocked}
                   />
                 </div>
 
-                <SubmitButton 
-                  title="Record Income" 
-                  loadingTitle="Saving Record..." 
-                  className="w-full bg-green-600 hover:bg-green-700 text-white" 
-                />
+                {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
+                {isLocked ? (
+                  <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2">
+                    <Lock size={16} /> Creation Locked
+                  </Button>
+                ) : (
+                  <SubmitButton 
+                    title="Record Income" 
+                    loadingTitle="Saving Record..." 
+                    className="w-full bg-green-600 hover:bg-green-700 text-white transition-all" 
+                  />
+                )}
               </form>
             </CardContent>
           </Card>
@@ -249,11 +276,17 @@ export default async function IncomePage(props: {
                           
                           <div className="flex items-center justify-center gap-2">
                             
-                            {/* Injecting the Secure Edit Interceptor */}
-                            <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
+                            {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
+                            {isLocked ? (
+                              <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                <Lock size={10} className="mr-1.5" /> Edit
+                              </Button>
+                            ) : (
+                              <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
+                            )}
 
-                            {/* Injecting the Secure Delete Dialog */}
-                            {isOwner && (
+                            {/* DELETE: Hidden entirely if locked to prevent visual clutter */}
+                            {isOwner && !isLocked && (
                               <IncomeDeleteDialog 
                                 incomeId={inc.id} 
                                 amount={inc.amount} 

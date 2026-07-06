@@ -4,7 +4,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { logSecurityEvent } from "@/lib/audit"; // <-- IMPORTED THE AUDIT LOGGER
+import { logSecurityEvent } from "@/lib/audit"; 
 
 // ============================================================================
 // 1. PROVISION TENANT (Upgraded with Address & Telemetry)
@@ -64,16 +64,19 @@ export async function provisionTenant(formData: FormData) {
 }
 
 // ============================================================================
-// 2. APPROVE TENANT (Super Admin Only)
+// 2. APPROVE TENANT (Super Admin Only - SaaS Orchestration)
 // ============================================================================
 export async function approveBusiness(formData: FormData) {
   const businessId = formData.get("business_id") as string;
-  if (!businessId) return { error: "Missing business ID" };
+  const trialDays = parseInt(formData.get("trial_days") as string || "15", 10);
+  const tier = formData.get("tier") as string || "essential";
+
+  if (!businessId) throw new Error("Missing business ID");
 
   const supabase = await createClient();
   
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "Unauthorized" };
+  if (!user) throw new Error("Unauthorized");
   
   const { data: profile } = await supabase
     .from("profiles")
@@ -82,15 +85,39 @@ export async function approveBusiness(formData: FormData) {
     .single();
     
   if (profile?.role !== "super_admin") {
-    return { error: "Insufficient privileges." };
+    throw new Error("Security Violation: Only Super Admins can approve SaaS tenants.");
   }
+
+  // Calculate the absolute Trial End Date securely on the server
+  const trialEndsAt = new Date();
+  trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
 
   const { error } = await supabase
     .from("businesses")
-    .update({ status: "active" })
+    .update({ 
+      status: "active",
+      subscription_status: "trial",
+      subscription_tier: tier,
+      trial_ends_at: trialEndsAt.toISOString()
+    })
     .eq("id", businessId);
 
-  if (error) return { error: error.message };
+  if (error) throw new Error("Failed to approve business: " + error.message);
+
+  // Enterprise Auditing: Log that a Super Admin provisioned a new commercial tenant
+  await logSecurityEvent({
+    businessId: businessId,
+    actorId: user.id,
+    action: "PROVISIONED_SAAS_TENANT",
+    tableName: "businesses",
+    recordId: businessId,
+    details: { 
+      action: "Super Admin approved and activated billing parameters.",
+      tier: tier, 
+      trial_duration_days: trialDays, 
+      trial_ends_at: trialEndsAt.toISOString() 
+    }
+  });
 
   revalidatePath("/admin/businesses");
 }
@@ -132,7 +159,7 @@ export async function updateTenantStaffLimit(businessId: string, newLimit: numbe
 }
 
 // ============================================================================
-// 4. CREATE NEW ORGANIZATION (SaaS Limit Firewall)
+// 4. CREATE NEW ORGANIZATION (SaaS Limit & Standing Firewall)
 // ============================================================================
 export async function createOrganization(formData: FormData) {
   const businessName = formData.get("business_name") as string;
@@ -143,12 +170,29 @@ export async function createOrganization(formData: FormData) {
 
   if (!user) return { error: "Unauthorized" };
 
+  // 1. Fetch the owner's profile to get their tier limit
   const { data: profile } = await supabase
     .from("profiles")
     .select("max_businesses_limit")
     .eq("id", user.id)
     .single();
 
+  // 2. THE ACCOUNT STANDING GUARD: Check for existing suspensions/delinquencies
+  const { data: badStandingBiz } = await supabase
+    .from("businesses")
+    .select("id, business_name, subscription_status")
+    .eq("owner_id", user.id)
+    .in("subscription_status", ["past_due", "suspended", "canceled"])
+    .limit(1);
+
+  if (badStandingBiz && badStandingBiz.length > 0) {
+    const badBiz = badStandingBiz[0];
+    return { 
+      error: `Action Denied: Your organization "${badBiz.business_name}" is currently ${badBiz.subscription_status.toUpperCase()}. You must resolve your billing standing before provisioning new workspaces.` 
+    };
+  }
+
+  // 3. THE PLAN LIMIT FIREWALL
   const { count } = await supabase
     .from("businesses")
     .select("*", { count: 'exact', head: true })
@@ -160,6 +204,7 @@ export async function createOrganization(formData: FormData) {
     return { error: `Plan Limit Reached: You are only permitted to manage ${limit} organization(s). Please contact a Super Admin to upgrade your account tier.` };
   }
 
+  // 4. Provision the new workspace
   const { data: newBusiness, error: bizError } = await supabase
     .from("businesses")
     .insert({
@@ -167,12 +212,14 @@ export async function createOrganization(formData: FormData) {
       business_name: businessName,
       currency: currency,
       status: "active" 
+      // subscription_status implicitly defaults to 'trial' per our DB migration
     })
     .select("id")
     .single();
 
   if (bizError) return { error: bizError.message };
 
+  // 5. Automatically switch the owner to their new workspace
   await supabase
     .from("profiles")
     .update({ business_id: newBusiness.id })
@@ -284,6 +331,57 @@ export async function toggleBusinessFeature(businessId: string, featureColumn: s
     tableName: "businesses",
     recordId: businessId,
     details: { feature: featureColumn, newValue }
+  });
+
+  revalidatePath("/admin/businesses");
+}
+
+// ============================================================================
+// 8. OVERRIDE TENANT BILLING STATE (Super Admin Only)
+// ============================================================================
+export async function updateTenantBillingState(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  // Security Check: Only Super Admins
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== 'super_admin') {
+    throw new Error("Security Violation: Only Super Admins can alter tenant billing states.");
+  }
+
+  const businessId = formData.get("business_id") as string;
+  const newStatus = formData.get("subscription_status") as string;
+  
+  // Strict Enum Validation
+  const allowedStatuses = ['trial', 'active', 'past_due', 'suspended', 'canceled'];
+  if (!allowedStatuses.includes(newStatus)) {
+    throw new Error("Invalid subscription status.");
+  }
+
+  // Fetch previous state for audit log comparison
+  const { data: oldBiz } = await supabase.from("businesses").select("subscription_status, business_name").eq("id", businessId).single();
+
+  const { error } = await supabase
+    .from("businesses")
+    .update({ subscription_status: newStatus })
+    .eq("id", businessId);
+
+  if (error) throw new Error(error.message);
+
+  // Enterprise Auditing
+  await logSecurityEvent({
+    businessId,
+    actorId: user.id,
+    action: "OVERRODE_BILLING_STATE",
+    tableName: "businesses",
+    recordId: businessId,
+    details: { 
+      tenant: oldBiz?.business_name,
+      previous_status: oldBiz?.subscription_status,
+      new_status: newStatus,
+      reason: "Super Admin manual override."
+    }
   });
 
   revalidatePath("/admin/businesses");

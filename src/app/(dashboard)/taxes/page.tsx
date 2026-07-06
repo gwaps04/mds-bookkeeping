@@ -8,6 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Lock } from "lucide-react"; // THE FIX: Imported Lock icon
+
+// THE FIX: Import the SaaS Engine
+import { getTenantAccessLevel } from "@/lib/subscription";
 
 export default async function TaxesPage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
   const params = await props.searchParams;
@@ -19,16 +23,28 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
   const businessId = profile?.business_id;
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  const { data: business } = await supabase.from("businesses").select("is_tax_registered, tax_id").eq("id", businessId).single();
+  // ============================================================================
+  // 2. THE SAAS SUBSCRIPTION ENGINE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("is_tax_registered, tax_id, subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", businessId)
+    .single();
+    
   if (!business?.is_tax_registered) redirect("/settings");
 
-  // 2. Fetch Asset Accounts
+  const accessState = getTenantAccessLevel(business);
+  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+  // ============================================================================
+
+  // 3. Fetch Asset Accounts
   const { data: bankAccounts } = await supabase.from("accounts").select("id, name, account_number").eq("business_id", businessId).eq("type", "asset").order("name");
 
-  // 3. Fetch the ID for "Taxes, Licenses & Fees"
+  // 4. Fetch the ID for "Taxes, Licenses & Fees"
   const { data: taxCategory } = await supabase.from("accounts").select("id").eq("business_id", businessId).eq("name", "Taxes, Licenses & Fees").single();
 
-  // 4. BUILD THE SEARCH & FILTER QUERY FOR TAXES
+  // 5. BUILD THE SEARCH & FILTER QUERY FOR TAXES
   let query = supabase
     .from("expenses")
     .select(`id, amount, date, description, reference_number, accounts!expenses_account_id_fkey(name)`)
@@ -81,7 +97,7 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
                 
                 <div className="space-y-2">
                   <Label htmlFor="form_type">BIR Form Type</Label>
-                  <Select name="form_type" required>
+                  <Select name="form_type" required disabled={isLocked}>
                     <SelectTrigger><SelectValue placeholder="Select BIR form..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="2551Q">2551Q (Quarterly Percentage Tax)</SelectItem>
@@ -97,17 +113,17 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="amount">Amount (₱)</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required />
+                    <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required disabled={isLocked} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="date">Date Paid</Label>
-                    <Input id="date" name="date" type="date" required defaultValue={new Date().toISOString().split('T')[0]} />
+                    <Input id="date" name="date" type="date" required defaultValue={new Date().toISOString().split('T')[0]} disabled={isLocked} />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="account_id">Paid From (Bank / Cash)</Label>
-                  <Select name="account_id" required>
+                  <Select name="account_id" required disabled={isLocked}>
                     <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
                     <SelectContent>
                       {bankAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>)}
@@ -117,10 +133,19 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
 
                 <div className="space-y-2">
                   <Label htmlFor="reference">Reference No. (Optional)</Label>
-                  <Input id="reference" name="reference" placeholder="e.g. eFPS / GCash Ref No." />
+                  <Input id="reference" name="reference" placeholder="e.g. eFPS / GCash Ref No." disabled={isLocked} />
                 </div>
 
-                <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white mt-4">Log Tax Payment</Button>
+                {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
+                {isLocked ? (
+                  <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 mt-4">
+                    <Lock size={16} /> Creation Locked
+                  </Button>
+                ) : (
+                  <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white mt-4 transition-all">
+                    Log Tax Payment
+                  </Button>
+                )}
               </form>
             </CardContent>
           </Card>
@@ -196,13 +221,21 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
                             -₱{Number(record.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                           </td>
                           <td className="px-4 py-4 text-center">
+                            
+                            {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
                             <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                               
-                              <Link href={`/taxes/${record.id}/edit`}>
-                                <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
-                              </Link>
+                              {isLocked ? (
+                                <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                  <Lock size={10} className="mr-1.5" /> Edit
+                                </Button>
+                              ) : (
+                                <Link href={`/taxes/${record.id}/edit`}>
+                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50 transition-colors">Edit</Button>
+                                </Link>
+                              )}
 
-                              {isOwner && (
+                              {isOwner && !isLocked && (
                                 <form action={async (formData) => {
                                   "use server";
                                   await deleteTaxPayment(formData);

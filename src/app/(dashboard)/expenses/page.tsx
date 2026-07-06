@@ -9,10 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-import { Paperclip, Camera, Upload } from "lucide-react"; 
+import { Paperclip, Camera, Upload, Lock } from "lucide-react"; // THE FIX: Imported Lock icon
 
-// THE FIX: Import our new Security Gates
+// THE FIX: Import our new Security Gates & SaaS Engine
 import { ExpenseEditInterceptor, ExpenseDeleteDialog } from "./ExpenseActionDialogs";
+import { getTenantAccessLevel } from "@/lib/subscription";
 
 export default async function ExpensesPage(props: { 
   searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string }> 
@@ -32,6 +33,19 @@ export default async function ExpensesPage(props: {
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
   
   const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
+
+  // ============================================================================
+  // 1. THE SAAS SUBSCRIPTION ENGINE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", profile?.business_id)
+    .single();
+
+  const accessState = getTenantAccessLevel(business);
+  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+  // ============================================================================
 
   const { data: accounts } = await supabase
     .from("accounts")
@@ -89,6 +103,7 @@ export default async function ExpensesPage(props: {
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
+        {/* CREATE EXPENSE FORM */}
         <div className="lg:col-span-1">
           <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
             <CardHeader>
@@ -103,23 +118,23 @@ export default async function ExpensesPage(props: {
                 
                 <div className="space-y-2">
                   <Label htmlFor="vendor_name">Vendor / Payee</Label>
-                  <Input id="vendor_name" name="vendor_name" placeholder="e.g. Meralco, Office Warehouse" required />
+                  <Input id="vendor_name" name="vendor_name" placeholder="e.g. Meralco, Office Warehouse" required disabled={isLocked} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="amount">Amount</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required />
+                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required disabled={isLocked} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="date">Date</Label>
-                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required />
+                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required disabled={isLocked} />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="category_id">Expense Category</Label>
-                  <Select name="category_id" required>
+                  <Select name="category_id" required disabled={isLocked}>
                     <SelectTrigger><SelectValue placeholder="Select category..." /></SelectTrigger>
                     <SelectContent className="max-h-[300px]">
                       {expenseCategories.map((cat) => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}
@@ -129,7 +144,7 @@ export default async function ExpensesPage(props: {
 
                 <div className="space-y-2">
                   <Label htmlFor="account_id">Paid From (Bank / Cash)</Label>
-                  <Select name="account_id" required>
+                  <Select name="account_id" required disabled={isLocked}>
                     <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
                     <SelectContent className="max-h-[300px]">
                       {bankAccounts.map((acc) => <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>)}
@@ -139,24 +154,24 @@ export default async function ExpensesPage(props: {
 
                 <div className="space-y-2">
                   <Label htmlFor="reference_number">Reference No. (Optional)</Label>
-                  <Input id="reference_number" name="reference_number" placeholder="e.g. Receipt No." />
+                  <Input id="reference_number" name="reference_number" placeholder="e.g. Receipt No." disabled={isLocked} />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="description">Notes / Details</Label>
-                  <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-16" required />
+                  <Textarea id="description" name="description" placeholder="What was this for?" className="resize-none h-16" required disabled={isLocked} />
                 </div>
 
                 {canUploadReceipts ? (
-                  <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
+                  <div className={`space-y-3 p-4 rounded-lg border-2 border-dashed relative group overflow-hidden transition-colors ${isLocked ? 'bg-neutral-50 border-neutral-200' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50 hover:border-blue-300'}`}>
                     <div className="flex items-center gap-2 mb-1">
-                      <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-blue-200 rounded text-blue-600 shadow-sm">
+                      <div className={`flex items-center gap-1.5 px-2 py-1 bg-white border rounded shadow-sm ${isLocked ? 'text-neutral-400 border-neutral-200' : 'text-blue-600 border-blue-200'}`}>
                         <Camera size={14} className="md:hidden" />
                         <Upload size={14} className="hidden md:block" />
                         <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
                         <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
                       </div>
-                      <Label htmlFor="receipt" className="text-neutral-700 font-semibold cursor-pointer">
+                      <Label htmlFor="receipt" className={`font-semibold ${isLocked ? 'text-neutral-400' : 'text-neutral-700 cursor-pointer'}`}>
                         Attach Receipt (Optional)
                       </Label>
                     </div>
@@ -173,7 +188,8 @@ export default async function ExpensesPage(props: {
                       name="receipt" 
                       type="file" 
                       accept="image/jpeg, image/png, application/pdf" 
-                      className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto w-full" 
+                      disabled={isLocked}
+                      className={`file:font-semibold file:bg-white file:border file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:transition-colors file:shadow-sm text-xs bg-transparent border-0 p-0 h-auto w-full ${isLocked ? 'cursor-not-allowed file:text-neutral-400 file:border-neutral-200 text-neutral-400' : 'cursor-pointer file:text-blue-700 file:border-blue-200 file:hover:bg-blue-50 text-neutral-500'}`} 
                     />
                   </div>
                 ) : (
@@ -188,17 +204,24 @@ export default async function ExpensesPage(props: {
                         Digital document storage and mobile scanning are available on Premium plans.
                       </p>
                     </div>
-                    <Button type="button" variant="outline" size="sm" className="h-7 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50 mt-1 cursor-not-allowed">
+                    <Button type="button" disabled variant="outline" size="sm" className="h-7 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50 mt-1 cursor-not-allowed">
                       Upgrade to Unlock
                     </Button>
                   </div>
                 )}
 
-                <SubmitButton 
-                  title="Record Expense" 
-                  loadingTitle="Recording..." 
-                  className="w-full bg-neutral-900 text-white hover:bg-neutral-800" 
-                />
+                {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
+                {isLocked ? (
+                  <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2">
+                    <Lock size={16} /> Creation Locked
+                  </Button>
+                ) : (
+                  <SubmitButton 
+                    title="Record Expense" 
+                    loadingTitle="Recording..." 
+                    className="w-full bg-neutral-900 text-white hover:bg-neutral-800 transition-all" 
+                  />
+                )}
               </form>
             </CardContent>
           </Card>
@@ -264,6 +287,7 @@ export default async function ExpensesPage(props: {
                           <p className="font-medium text-neutral-900">{vendorName}</p>
                           <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[150px] lg:max-w-[200px]">{exp.description}</p>
                           
+                          {/* NOTE: Document viewing remains active even when locked! */}
                           {exp.receipt_url && (
                             <a 
                               href={exp.receipt_url} 
@@ -285,12 +309,19 @@ export default async function ExpensesPage(props: {
                         </td>
                         <td className="px-4 py-4 text-center">
                           
-                          {/* THE FIX: Absolute Discoverability - No hover constraints! */}
                           <div className="flex items-center justify-center gap-2">
                             
-                            <ExpenseEditInterceptor targetUrl={`/expenses/${exp.id}/edit`} />
+                            {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
+                            {isLocked ? (
+                              <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                <Lock size={10} className="mr-1.5" /> Edit
+                              </Button>
+                            ) : (
+                              <ExpenseEditInterceptor targetUrl={`/expenses/${exp.id}/edit`} />
+                            )}
                             
-                            {isOwner && (
+                            {/* DELETE: Hidden entirely if locked to prevent visual clutter */}
+                            {isOwner && !isLocked && (
                               <ExpenseDeleteDialog 
                                 expenseId={exp.id} 
                                 amount={exp.amount} 

@@ -6,13 +6,20 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit";
 
+// THE FIX: Import the Centralized API Defense Guard
+import { verifyActiveSubscription } from "@/lib/subscription";
+
 // ============================================================================
 // 1. CREATE DIRECT INCOME
 // ============================================================================
 export async function createIncome(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
@@ -73,7 +80,11 @@ export async function createIncome(formData: FormData) {
 export async function updateIncome(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
@@ -132,7 +143,11 @@ export async function updateIncome(formData: FormData) {
 export async function deleteIncome(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
   if (!profile?.business_id) throw new Error("No business found");

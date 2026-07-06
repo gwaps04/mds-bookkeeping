@@ -9,6 +9,9 @@ import SideNav from "@/components/SideNav";
 import Footer from "@/components/Footer"; 
 import RealtimeSync from "@/components/RealtimeSync";
 
+// THE FIX: Imported the SaaS Banner
+import { SaaSLockoutBanner } from "@/components/SaaSLockoutBanner";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -85,7 +88,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* DESKTOP SIDEBAR */}
       <aside className="w-64 bg-white border-r border-neutral-200 hidden md:flex flex-col print:hidden">
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
-          {/* BRANDING UPDATE 1: Desktop Sidebar */}
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MacroBiz</h1>
         </div>
         
@@ -113,7 +115,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0 print:hidden">
           <div className="flex items-center gap-2 md:hidden">
             <MobileNav role={profile?.role} isTaxEnabled={isTaxEnabled} />
-            {/* BRANDING UPDATE 2: Mobile Header */}
             <span className="font-bold text-lg tracking-tight">MacroBiz</span>
           </div>
 
@@ -127,10 +128,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
+        {/* ============================================================================ */}
+        {/* THE SAAS BILLING GATEWAY */}
+        {/* ============================================================================ */}
+        <div className="print:hidden">
+          <SaaSLockoutBanner />
+        </div>
+
         {/* PAGE CONTENT & FOOTER WRAPPER */}
-        <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white">
+        <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white relative">
           
-          <div className="flex-1 p-6 md:p-8 w-full max-w-6xl mx-auto print:p-0">
+          <div className="flex-1 p-6 md:p-8 w-full max-w-6xl mx-auto print:p-0 relative z-0">
             {children}
           </div>
           

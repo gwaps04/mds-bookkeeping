@@ -8,9 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import CreateAccountForm from "./CreateAccountForm"; 
-import ArchiveAccountDialog from "./ArchiveAccountDialog"; // THE SMART INTERCEPTOR
+import ArchiveAccountDialog from "./ArchiveAccountDialog"; 
 import SubmitButton from "@/components/SubmitButton"; 
-import { ArchiveRestore } from "lucide-react"; 
+import { ArchiveRestore, Lock } from "lucide-react"; // THE FIX: Imported Lock icon
+
+// THE FIX: Import the SaaS Engine
+import { getTenantAccessLevel } from "@/lib/subscription";
 
 export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string, view?: string }> }) {
   const params = await props.searchParams;
@@ -32,6 +35,19 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
   const canCreateAccount = isOwner || (role === 'staff' && allowAccountCreation);
 
   const isArchiveView = params?.view === 'archived';
+
+  // ============================================================================
+  // 1. THE SAAS SUBSCRIPTION ENGINE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", businessId)
+    .single();
+
+  const accessState = getTenantAccessLevel(business);
+  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+  // ============================================================================
 
   // ============================================================================
   // THE GATEKEEPER: Dynamic Archive / Active Querying
@@ -67,7 +83,22 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
         <div className="lg:col-span-1">
-          {canCreateAccount ? (
+          {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE CREATION CARD */}
+          {isLocked ? (
+            <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8 bg-neutral-50/50">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2 text-neutral-700">
+                  <Lock size={18} /> Creation Locked
+                </CardTitle>
+                <CardDescription>Your ledger is in Read-Only mode.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 bg-neutral-100 border border-neutral-200 rounded-md text-sm text-neutral-600 leading-relaxed text-center">
+                  Please resolve your billing status to add new banks or financial categories to your ledger.
+                </div>
+              </CardContent>
+            </Card>
+          ) : canCreateAccount ? (
             <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8">
               <CardHeader>
                 <CardTitle className="text-lg">Add New Account</CardTitle>
@@ -182,7 +213,12 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                           <td className="px-4 py-4 text-center">
                             <div className="flex items-center justify-center gap-2">
                               
-                              {canCreateAccount && (
+                              {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
+                              {isLocked ? (
+                                <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                  <Lock size={10} className="mr-1.5" /> Locked
+                                </Button>
+                              ) : canCreateAccount ? (
                                 isArchiveView ? (
                                   /* THE RESTORE BUTTON UI */
                                   <form action={async (formData) => {
@@ -203,11 +239,10 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                                       <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
                                     </Link>
                                     
-                                    {/* THE NEW MODAL INTERCEPTOR */}
                                     <ArchiveAccountDialog accountId={acc.id} accountName={acc.name} />
                                   </>
                                 )
-                              )}
+                              ) : null}
 
                             </div>
                           </td>

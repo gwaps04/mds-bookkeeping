@@ -6,6 +6,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit"; 
 
+// THE FIX: Import the Centralized API Defense Guard
+import { verifyActiveSubscription } from "@/lib/subscription";
+
 // ============================================================================
 // 1. CREATE INVOICE
 // ============================================================================
@@ -14,6 +17,9 @@ export async function createOfficialInvoice(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
@@ -65,7 +71,11 @@ export async function createOfficialInvoice(formData: FormData) {
 export async function updateOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
@@ -113,7 +123,11 @@ export async function updateOfficialInvoice(formData: FormData) {
 export async function deleteOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const id = formData.get("id") as string;
 
@@ -143,7 +157,11 @@ export async function deleteOfficialInvoice(formData: FormData) {
 export async function recordInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
@@ -199,7 +217,11 @@ export async function recordInvoicePayment(formData: FormData) {
 export async function updateInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   if (!profile?.business_id) throw new Error("No business found");
@@ -246,7 +268,11 @@ export async function updateInvoicePayment(formData: FormData) {
 export async function deleteInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
   if (!profile?.business_id) throw new Error("No business found");
@@ -292,7 +318,11 @@ export async function deleteInvoicePayment(formData: FormData) {
 export async function requestPaymentVoid(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   if (!profile?.business_id) throw new Error("No business found");
@@ -326,7 +356,11 @@ export async function requestPaymentVoid(formData: FormData) {
 export async function resolvePaymentVoid(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+  
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
   if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') throw new Error("Unauthorized");

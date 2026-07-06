@@ -6,13 +6,20 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit";
 
+// THE FIX: Import the Centralized API Defense Guard
+import { verifyActiveSubscription } from "@/lib/subscription";
+
 // ============================================================================
 // 1. CREATE EXPENSE (Available to Owners & Staff)
 // ============================================================================
 export async function createExpense(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const business_id = profile?.business_id;
@@ -108,7 +115,11 @@ export async function createExpense(formData: FormData) {
 export async function updateExpense(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const business_id = profile?.business_id;
@@ -201,7 +212,11 @@ export async function updateExpense(formData: FormData) {
 export async function deleteExpense(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  
   if (!user) throw new Error("Unauthorized");
+
+  // INJECT THE ZERO-TRUST API GUARD
+  await verifyActiveSubscription(user.id);
 
   const id = formData.get("id") as string;
   const voidReason = formData.get("void_reason") as string || "Owner forced deletion.";

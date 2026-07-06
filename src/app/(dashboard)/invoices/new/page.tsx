@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import InvoiceForm from "./InvoiceForm";
 import Link from "next/link";
 
+// THE FIX: Import the SaaS Engine and the Redirect utility
+import { getTenantAccessLevel } from "@/lib/subscription";
+import { redirect } from "next/navigation";
+
 export default async function NewInvoicePage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -14,6 +18,23 @@ export default async function NewInvoicePage() {
     .eq("id", user?.id)
     .single();
 
+  // ============================================================================
+  // INJECT THIS ROUTE GUARD BEFORE RENDERING THE PAGE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", profile?.business_id)
+    .single();
+
+  const accessState = getTenantAccessLevel(business);
+  if (accessState.isLocked) {
+    // If they type the URL manually to bypass the disabled button, 
+    // kick them back to the ledger where the red banner will remind them to subscribe!
+    redirect("/invoices"); 
+  }
+  // ============================================================================
+
   // Fetch past customers to auto-populate the client dropdown!
   const { data: customers } = await supabase
     .from("customers")
@@ -24,7 +45,7 @@ export default async function NewInvoicePage() {
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center gap-4">
-        <Link href="/invoices" className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors bg-white px-3 py-1.5 rounded-md border border-neutral-200">
+        <Link href="/invoices" className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors bg-white px-3 py-1.5 rounded-md border border-neutral-200 shadow-sm">
           &larr; Cancel
         </Link>
         <div>

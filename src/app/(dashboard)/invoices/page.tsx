@@ -8,6 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import ConfirmDeleteForm from "@/components/ConfirmDeleteForm";
+import { Lock, Plus } from "lucide-react"; // THE FIX: Imported icons for visual feedback
+
+
+// THE FIX: Import the SaaS Engine
+import { getTenantAccessLevel } from "@/lib/subscription";
+import { redirect } from "next/navigation";
+
+
+
 
 export default async function InvoicesPage(props: { searchParams: Promise<{ search?: string, status?: string }> }) {
   const params = await props.searchParams;
@@ -17,10 +26,24 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user?.id).single();
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // 1. GET TODAY'S DATE FOR THE DETECTOR
+
+  
+  // ============================================================================
+  // 1. THE SAAS SUBSCRIPTION ENGINE
+  // ============================================================================
+  const { data: business } = await supabase
+    .from("businesses")
+    .select("subscription_status, subscription_tier, trial_ends_at")
+    .eq("id", profile?.business_id)
+    .single();
+
+  const accessState = getTenantAccessLevel(business);
+  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+
+  // 2. GET TODAY'S DATE FOR THE DETECTOR
   const today = new Date().toISOString().split('T')[0];
 
-  // 2. BUILD SEARCH & FILTER QUERY
+  // 3. BUILD SEARCH & FILTER QUERY
   let query = supabase
     .from("invoices")
     .select("*")
@@ -29,7 +52,7 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
 
   if (params?.search) query = query.ilike("client_name", `%${params.search}%`);
   
-  // 3. THE SMART STATUS FILTER
+  // 4. THE SMART STATUS FILTER
   if (params?.status && params?.status !== "all") {
     if (params.status === "overdue") {
       query = query.neq("status", "paid").neq("status", "cancelled").lt("due_date", today);
@@ -40,7 +63,7 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
 
   const { data: fetchedInvoices } = await query;
 
-  // 4. THE OVERDUE DETECTOR (ON-THE-FLY INTERCEPTOR)
+  // 5. THE OVERDUE DETECTOR (ON-THE-FLY INTERCEPTOR)
   const invoices = (fetchedInvoices || []).map(inv => {
     const isOverdue = (inv.status !== 'paid' && inv.status !== 'cancelled') && (inv.due_date < today);
     return {
@@ -58,9 +81,19 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
           <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Invoices</h2>
           <p className="text-neutral-500 mt-1">Manage and track your accounts receivable.</p>
         </div>
-        <Link href="/invoices/new">
-          <Button className="bg-blue-700 hover:bg-blue-800 text-white shadow-sm font-medium">+ Create Invoice</Button>
-        </Link>
+        
+        {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
+        {isLocked ? (
+          <Button disabled className="bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center gap-2">
+            <Lock size={14} /> Creation Locked
+          </Button>
+        ) : (
+          <Link href="/invoices/new">
+            <Button className="bg-blue-700 hover:bg-blue-800 text-white shadow-sm font-medium flex items-center gap-1.5 transition-all">
+              <Plus size={16} /> Create Invoice
+            </Button>
+          </Link>
+        )}
       </div>
 
       {/* SEARCH & FILTER BAR */}
@@ -149,16 +182,24 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           
+                          {/* VIEW PDF: Always available (Read-Only) */}
                           <Link href={`/invoices/${inv.id}`}>
-                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-neutral-700 hover:bg-neutral-100">View PDF</Button>
+                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-neutral-700 hover:bg-neutral-100 transition-colors">View PDF</Button>
                           </Link>
 
-                          <Link href={`/invoices/${inv.id}/edit`}>
-                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>
-                          </Link>
+                          {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
+                          {isLocked ? (
+                            <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                              <Lock size={10} className="mr-1.5" /> Edit
+                            </Button>
+                          ) : (
+                            <Link href={`/invoices/${inv.id}/edit`}>
+                              <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50 transition-colors">Edit</Button>
+                            </Link>
+                          )}
                           
-                          {/* THE COMPONENT DROP-IN */}
-                          {isOwner && (
+                          {/* DELETE: Hidden entirely if locked to prevent visual clutter */}
+                          {isOwner && !isLocked && (
                             <ConfirmDeleteForm 
                               action={deleteOfficialInvoice} 
                               id={inv.id} 

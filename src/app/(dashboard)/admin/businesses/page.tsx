@@ -1,12 +1,14 @@
 // src/app/(dashboard)/admin/businesses/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { approveBusiness } from "@/features/businesses/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
 import ManageLimitButton from "./ManageLimitButton"; 
 import ManageOrgLimitButton from "./ManageOrgLimitButton"; 
-import ManageFeaturesButton from "./ManageFeaturesButton"; // <-- THE NEW IMPORT
+import ManageFeaturesButton from "./ManageFeaturesButton";
+import ApproveTenantDialog from "./ApproveTenantDialog";
+// THE NEW IMPORT
+import ManageBillingDialog from "./ManageBillingDialog";
 
 export default async function SuperAdminBusinessesPage() {
   const supabase = await createClient();
@@ -22,13 +24,15 @@ export default async function SuperAdminBusinessesPage() {
     redirect("/dashboard");
   }
 
-  // Fetch Businesses + Features
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
       id,
       business_name,
       status,
+      subscription_status,
+      subscription_tier,
+      trial_ends_at,
       created_at,
       max_staff_limit,
       allow_receipt_uploads,
@@ -37,33 +41,33 @@ export default async function SuperAdminBusinessesPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12">
       <div>
-        <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Tenant Approvals</h2>
-        <p className="text-neutral-500 mt-1">Review and approve new businesses registering for MDS Ledger.</p>
+        <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Tenant & Billing Orchestration</h2>
+        <p className="text-neutral-500 mt-1">Review, approve, and manage SaaS subscriptions for all platform organizations.</p>
       </div>
 
       <Card className="shadow-sm border-neutral-200">
-        <CardHeader>
+        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100">
           <CardTitle className="text-lg">Registered SaaS Tenants</CardTitle>
-          <CardDescription>Master list of all companies using the platform.</CardDescription>
+          <CardDescription>Master list of all companies and their active billing states.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-neutral-50 border-b border-t border-neutral-200">
+              <thead className="bg-white border-b border-neutral-200">
                 <tr>
-                  <th className="px-6 py-3 font-medium text-neutral-900">Business Name</th>
-                  <th className="px-6 py-3 font-medium text-neutral-900">Owner Details</th>
-                  <th className="px-6 py-3 font-medium text-neutral-900">Registration Date</th>
-                  <th className="px-6 py-3 font-medium text-neutral-900">Status</th>
-                  <th className="px-6 py-3 font-medium text-neutral-900 text-right">Action</th>
+                  <th className="px-6 py-4 font-semibold text-neutral-600">Business Name</th>
+                  <th className="px-6 py-4 font-semibold text-neutral-600">Owner Details</th>
+                  <th className="px-6 py-4 font-semibold text-neutral-600">Plan & Billing</th>
+                  <th className="px-6 py-4 font-semibold text-neutral-600">System Status</th>
+                  <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-200">
+              <tbody className="divide-y divide-neutral-100">
                 {(!businesses || businesses.length === 0) ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-neutral-500">
+                    <td colSpan={5} className="px-6 py-12 text-center text-neutral-500">
                       No businesses registered yet.
                     </td>
                   </tr>
@@ -74,14 +78,31 @@ export default async function SuperAdminBusinessesPage() {
                       ? (biz.profiles as any[]).find(p => p.role === 'business_owner') 
                       : biz.profiles;
 
-                    // Fallback to true if the column was just created and is null
                     const hasReceipts = biz.allow_receipt_uploads !== false; 
+                    
+                    // State Machine Visual Logic
+                    const subStatus = biz.subscription_status || 'trial';
+                    const isTrial = subStatus === 'trial';
+                    const isActive = subStatus === 'active';
+                    const isSuspended = subStatus === 'suspended';
+                    const isCanceled = subStatus === 'canceled';
+                    const isPastDue = subStatus === 'past_due';
+
+                    // Calculate Semantic Badge Colors
+                    let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
+                    if (isTrial) badgeColor = "bg-blue-50 text-blue-700 border-blue-200";
+                    if (isActive) badgeColor = "bg-green-50 text-green-700 border-green-200";
+                    if (isPastDue) badgeColor = "bg-amber-50 text-amber-700 border-amber-200";
+                    if (isSuspended || isCanceled) badgeColor = "bg-red-50 text-red-700 border-red-200";
 
                     return (
-                      <tr key={biz.id} className="hover:bg-neutral-50 transition-colors">
-                        <td className="px-6 py-4 font-bold text-neutral-900">
-                          {biz.business_name}
+                      <tr key={biz.id} className="hover:bg-neutral-50/80 transition-colors group">
+                        
+                        <td className="px-6 py-4">
+                          <p className="font-bold text-neutral-900">{biz.business_name}</p>
+                          <p className="text-xs text-neutral-400 mt-1 font-mono">ID: {biz.id.split('-')[0]}</p>
                         </td>
+                        
                         <td className="px-6 py-4">
                           <div className="flex flex-col items-start">
                             <span className="font-medium text-neutral-900">{owner?.full_name || 'Unknown'}</span>
@@ -95,37 +116,70 @@ export default async function SuperAdminBusinessesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-neutral-500 text-xs">
-                          {new Date(biz.created_at).toLocaleDateString()}
-                        </td>
+
                         <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          {biz.status === 'pending' ? (
+                            <span className="text-xs text-neutral-400 italic">Awaiting Provisioning</span>
+                          ) : (
+                            <div className="flex flex-col items-start gap-1.5">
+                              <div className="flex gap-2 items-center">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-900 text-white shadow-sm">
+                                  {biz.subscription_tier || 'ESSENTIAL'}
+                                </span>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${badgeColor}`}>
+                                  {subStatus}
+                                </span>
+                              </div>
+                              
+                              {isTrial && biz.trial_ends_at && (
+                                <span className="text-[11px] font-medium text-blue-600 mt-1 flex items-center gap-1">
+                                  Expires: {new Date(biz.trial_ends_at).toLocaleDateString()}
+                                </span>
+                              )}
+                              {isActive && (
+                                <span className="text-[11px] font-medium text-green-600 mt-1">
+                                  Good Standing
+                                </span>
+                              )}
+                              {(isSuspended || isCanceled || isPastDue) && (
+                                <span className="text-[11px] font-medium text-red-600 mt-1">
+                                  Account Soft-Locked
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${
                             biz.status === 'active' 
-                              ? 'bg-green-50 text-green-700 border border-green-200' 
-                              : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
                           }`}>
-                            {biz.status ? biz.status.toUpperCase() : 'UNKNOWN'}
+                            <span className={`w-1.5 h-1.5 rounded-full mr-2 ${biz.status === 'active' ? 'bg-green-500' : 'bg-neutral-400'}`}></span>
+                            {biz.status ? biz.status : 'UNKNOWN'}
                           </span>
                         </td>
+
                         <td className="px-6 py-4 text-right">
                           {biz.status === 'pending' ? (
-                            <form action={async (formData) => {
-                              "use server";
-                              await approveBusiness(formData);
-                            }}>
-                              <input type="hidden" name="business_id" value={biz.id} />
-                              <Button type="submit" size="sm" className="bg-green-600 hover:bg-green-700 text-white">
-                                Approve Tenant
-                              </Button>
-                            </form>
+                            <ApproveTenantDialog businessId={biz.id} businessName={biz.business_name} />
                           ) : (
-                            <div className="flex items-center justify-end gap-2">
-                              {/* THE NEW FEATURES BUTTON */}
+                            // THE FIX: Removed opacity constraints. Actions are permanently visible.
+                            <div className="flex items-center justify-end gap-2 flex-wrap max-w-[280px] ml-auto">
+                              
+                              <ManageBillingDialog 
+                                businessId={biz.id} 
+                                businessName={biz.business_name}
+                                currentStatus={subStatus}
+                              />
+                              
                               <ManageFeaturesButton 
                                 businessId={biz.id} 
                                 businessName={biz.business_name}
                                 currentReceiptStatus={hasReceipts}
                               />
+                              
                               <ManageLimitButton 
                                 businessId={biz.id} 
                                 businessName={biz.business_name} 
