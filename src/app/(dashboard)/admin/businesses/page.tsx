@@ -11,8 +11,61 @@ import ManageOrgLimitButton from "./ManageOrgLimitButton";
 import ManageFeaturesButton from "./ManageFeaturesButton";
 import ApproveTenantDialog from "./ApproveTenantDialog";
 import ManageBillingDialog from "./ManageBillingDialog";
+import OwnerProfileDialog from "./OwnerProfileDialog"; 
 import Link from "next/link";
 import React from "react";
+import { ChevronDown, Mail } from "lucide-react"; 
+
+// ============================================================================
+// HELPER FUNCTIONS FOR CLEAN JSX
+// ============================================================================
+function renderPlanAndBilling(biz: any) {
+  if (biz.status === 'pending') {
+    return <span className="text-xs text-neutral-400 italic">Awaiting Provisioning</span>;
+  }
+
+  const subStatus = biz.subscription_status || 'trial';
+  const isTrial = subStatus === 'trial';
+  const isActive = subStatus === 'active';
+  const isSuspended = subStatus === 'suspended';
+  const isCanceled = subStatus === 'canceled';
+  const isPastDue = subStatus === 'past_due';
+
+  let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
+  if (isTrial) badgeColor = "bg-blue-50 text-blue-700 border-blue-200";
+  if (isActive) badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (isPastDue) badgeColor = "bg-amber-50 text-amber-700 border-amber-200";
+  if (isSuspended || isCanceled) badgeColor = "bg-red-50 text-red-700 border-red-200";
+
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <div className="flex gap-2 items-center">
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-900 text-white shadow-sm">
+          {biz.subscription_tier || 'ESSENTIAL'}
+        </span>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${badgeColor}`}>
+          {subStatus}
+        </span>
+      </div>
+      {isTrial && biz.trial_ends_at && (
+        <span className="text-[11px] font-medium text-blue-600 mt-1">Expires: {new Date(biz.trial_ends_at).toLocaleDateString()}</span>
+      )}
+      {isActive && <span className="text-[11px] font-medium text-emerald-600 mt-1">Good Standing</span>}
+      {(isSuspended || isCanceled || isPastDue) && <span className="text-[11px] font-medium text-red-600 mt-1 animate-pulse">Account Locked</span>}
+    </div>
+  );
+}
+
+function renderSystemStatus(biz: any) {
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+      biz.status === 'active' ? 'bg-emerald-100 text-emerald-800 border-emerald-200 border' : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
+    }`}>
+      <span className={`w-1.5 h-1.5 rounded-full mr-2 ${biz.status === 'active' ? 'bg-emerald-500' : 'bg-neutral-400'}`}></span>
+      {biz.status ? biz.status : 'UNKNOWN'}
+    </span>
+  );
+}
 
 export default async function SuperAdminBusinessesPage(props: { 
   searchParams: Promise<{ search?: string, tier?: string, billing?: string, status?: string }> 
@@ -29,23 +82,35 @@ export default async function SuperAdminBusinessesPage(props: {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user?.id).single();
   if (profile?.role !== 'super_admin') redirect("/dashboard");
 
-  // 1. FETCH RAW DATA (Including mobile_number for searchability)
+  // ============================================================================
+  // 1. THE DECOUPLED DATA FETCH (Fixes the "Unknown Owner" bug)
+  // ============================================================================
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
       id,
+      owner_id, 
       business_name,
+      address,
       status,
       subscription_status,
       subscription_tier,
       trial_ends_at,
       created_at,
       max_staff_limit,
-      allow_receipt_uploads,
-      profiles ( id, full_name, email, mobile_number, role, max_businesses_limit )
+      allow_receipt_uploads
     `)
-    // We order ASC first to guarantee the oldest account is ALWAYS index 0
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true }); 
+
+  // Extract unique owner IDs to fetch their permanent identity profiles
+  const ownerIds = Array.from(new Set((businesses || []).map(b => b.owner_id).filter(Boolean)));
+  
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select(`id, full_name, email, mobile_number, role, max_businesses_limit, created_at`)
+    .in('id', ownerIds);
+
+  const profilesMap = new Map((profiles || []).map(p => [p.id, p]));
 
   // ============================================================================
   // 2. THE IN-MEMORY DATA PIPELINE & GROUPING ENGINE
@@ -53,62 +118,74 @@ export default async function SuperAdminBusinessesPage(props: {
   const portfoliosMap = new Map<string, { ownerDetails: any; mainAccountId: string; businesses: any[] }>();
 
   (businesses || []).forEach((biz) => {
-    const isArray = Array.isArray(biz.profiles);
-    const owner = isArray ? (biz.profiles as any[]).find(p => p.role === 'business_owner') : biz.profiles;
-    const ownerId = owner?.id || `unassigned-${biz.id}`; // Fallback for orphaned accounts
+    const ownerId = biz.owner_id;
+    // Map the business back to the permanent owner profile
+    const owner = profilesMap.get(ownerId) || { id: ownerId, full_name: 'Unknown Owner', email: 'No email' };
     
     if (!portfoliosMap.has(ownerId)) {
       portfoliosMap.set(ownerId, {
         ownerDetails: owner,
-        mainAccountId: biz.id, // The first one inserted is the Main Account
+        mainAccountId: biz.id, // The first one inserted is mathematically the Primary Workspace
         businesses: []
       });
     }
     portfoliosMap.get(ownerId)?.businesses.push(biz);
   });
 
-  // 3. FILTERING & SORTING ENGINE
-  let processedPortfolios = Array.from(portfoliosMap.values());
+  // ============================================================================
+  // 3. FILTERING & MERGED ROOT ASSIGNMENT
+  // ============================================================================
+  let processedPortfolios = Array.from(portfoliosMap.values()).map(portfolio => {
+    
+    const mainAccount = portfolio.businesses.find(b => b.id === portfolio.mainAccountId);
+    
+    let subAccounts = portfolio.businesses.filter(b => b.id !== portfolio.mainAccountId);
+    subAccounts.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  processedPortfolios = processedPortfolios.map(portfolio => {
-    // A. Apply exact filters to the businesses within the portfolio
-    let filteredBiz = portfolio.businesses;
+    if (tierFilter !== 'all') subAccounts = subAccounts.filter(b => (b.subscription_tier || 'essential').toLowerCase() === tierFilter.toLowerCase());
+    if (billingFilter !== 'all') subAccounts = subAccounts.filter(b => (b.subscription_status || 'trial').toLowerCase() === billingFilter.toLowerCase());
+    if (statusFilter !== 'all') subAccounts = subAccounts.filter(b => (b.status || 'pending').toLowerCase() === statusFilter.toLowerCase());
 
-    if (tierFilter !== 'all') {
-      filteredBiz = filteredBiz.filter(b => (b.subscription_tier || 'essential').toLowerCase() === tierFilter.toLowerCase());
-    }
-    if (billingFilter !== 'all') {
-      filteredBiz = filteredBiz.filter(b => (b.subscription_status || 'trial').toLowerCase() === billingFilter.toLowerCase());
-    }
-    if (statusFilter !== 'all') {
-      filteredBiz = filteredBiz.filter(b => (b.status || 'pending').toLowerCase() === statusFilter.toLowerCase());
-    }
+    let mainMatchesExact = true;
+    if (tierFilter !== 'all' && (mainAccount?.subscription_tier || 'essential').toLowerCase() !== tierFilter.toLowerCase()) mainMatchesExact = false;
+    if (billingFilter !== 'all' && (mainAccount?.subscription_status || 'trial').toLowerCase() !== billingFilter.toLowerCase()) mainMatchesExact = false;
+    if (statusFilter !== 'all' && (mainAccount?.status || 'pending').toLowerCase() !== statusFilter.toLowerCase()) mainMatchesExact = false;
 
-    return { ...portfolio, businesses: filteredBiz };
-  }).filter(portfolio => {
-    // B. Remove the portfolio entirely if no businesses matched the filters
-    if (portfolio.businesses.length === 0) return false;
-
-    // C. Apply the Global Search (Name, Email, Phone, or Business Name)
-    if (searchStr) {
+    let mainMatchesSearch = false;
+    if (searchStr && mainAccount) {
       const ownerName = (portfolio.ownerDetails?.full_name || '').toLowerCase();
       const ownerEmail = (portfolio.ownerDetails?.email || '').toLowerCase();
       const ownerPhone = (portfolio.ownerDetails?.mobile_number || '').toLowerCase();
-      const hasMatchingBiz = portfolio.businesses.some(b => b.business_name.toLowerCase().includes(searchStr));
+      const mainName = mainAccount.business_name.toLowerCase();
       
-      return ownerName.includes(searchStr) || ownerEmail.includes(searchStr) || ownerPhone.includes(searchStr) || hasMatchingBiz;
+      if (ownerName.includes(searchStr) || ownerEmail.includes(searchStr) || ownerPhone.includes(searchStr) || mainName.includes(searchStr)) {
+        mainMatchesSearch = true;
+      }
+      subAccounts = subAccounts.filter(b => b.business_name.toLowerCase().includes(searchStr));
+    } else {
+      mainMatchesSearch = true; 
     }
-    
-    return true;
-  });
 
-  // D. THE FIX: Sort Portfolios DESCENDING so the newest customers are at the top!
-  processedPortfolios.sort((a, b) => {
-    const dateA = new Date(a.businesses[0]?.created_at || 0).getTime();
-    const dateB = new Date(b.businesses[0]?.created_at || 0).getTime();
-    return dateB - dateA;
-  });
+    return {
+      ownerDetails: portfolio.ownerDetails,
+      mainAccount: mainAccount,
+      subAccounts: subAccounts,
+      hasMatches: (mainMatchesExact && mainMatchesSearch) || subAccounts.length > 0
+    };
+  }).filter(p => p.hasMatches && p.mainAccount); 
+
   // ============================================================================
+  // 4. EXTERNAL PORTFOLIO SORTING (Latest to Oldest Activity)
+  // ============================================================================
+  processedPortfolios.sort((a, b) => {
+    const datesA = [new Date(a.mainAccount.created_at).getTime(), ...a.subAccounts.map(biz => new Date(biz.created_at).getTime())];
+    const datesB = [new Date(b.mainAccount.created_at).getTime(), ...b.subAccounts.map(biz => new Date(biz.created_at).getTime())];
+    
+    const newestA = Math.max(...datesA);
+    const newestB = Math.max(...datesB);
+    
+    return newestB - newestA; // Sort Descending
+  });
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12">
@@ -117,19 +194,13 @@ export default async function SuperAdminBusinessesPage(props: {
         <p className="text-neutral-500 mt-1">Review, approve, and manage SaaS subscriptions for all platform organizations.</p>
       </div>
 
-      {/* THE TRIAGE CONTROL CENTER */}
       <Card className="shadow-sm border-neutral-200 bg-white">
         <CardContent className="p-4 md:p-5">
           <form method="GET" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
             
             <div className="lg:col-span-2 space-y-1.5">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Global Search</Label>
-              <Input 
-                name="search" 
-                placeholder="Search owner name, email, phone, or workspace..." 
-                defaultValue={params?.search} 
-                className="bg-neutral-50 border-neutral-200"
-              />
+              <Input name="search" placeholder="Search owner name, email, phone, or workspace..." defaultValue={params?.search} className="bg-neutral-50 border-neutral-200" />
             </div>
 
             <div className="space-y-1.5">
@@ -176,191 +247,177 @@ export default async function SuperAdminBusinessesPage(props: {
         </CardContent>
       </Card>
 
-      <Card className="shadow-sm border-neutral-200">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
-          <CardTitle className="text-lg">Registered SaaS Portfolios</CardTitle>
-          <CardDescription>Master list of all owners and their associated workspaces.</CardDescription>
+      <Card className="shadow-sm border-neutral-200 overflow-hidden">
+        <CardHeader className="bg-neutral-50/50 border-b border-neutral-200 py-4">
+          <CardTitle className="text-lg">Workspace Management</CardTitle>
+          <CardDescription>Hierarchical view of primary workspaces and their sub-organizations.</CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap min-w-[1000px]">
-              <thead className="bg-white border-b border-neutral-200">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap min-w-[1200px]">
+            <thead className="bg-neutral-100/50 border-b border-neutral-200">
+              <tr>
+                <th className="px-6 py-4 font-semibold text-neutral-600">Workspace Name</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600">Workspace Type</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600">Plan & Billing</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600">System Status</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Actions</th>
+              </tr>
+            </thead>
+            
+            {processedPortfolios.length === 0 ? (
+              <tbody>
                 <tr>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Workspace Name</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Hierarchy</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Plan & Billing</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">System Status</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Actions</th>
+                  <td colSpan={5} className="px-6 py-16 text-center text-neutral-500 bg-white">
+                    <div className="flex flex-col items-center justify-center space-y-3">
+                      <div className="p-3 bg-neutral-100 rounded-full text-neutral-400">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      </div>
+                      <p className="text-base font-medium text-neutral-900">No workspaces found</p>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {processedPortfolios.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-16 text-center text-neutral-500 bg-neutral-50/30">
-                      <div className="flex flex-col items-center justify-center space-y-3">
-                        <div className="p-3 bg-neutral-100 rounded-full text-neutral-400">
-                          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              </tbody>
+            ) : (
+              processedPortfolios.map((portfolio) => (
+                <tbody key={portfolio.mainAccount.id} className="border-b-[6px] border-neutral-100/80 bg-white">
+                  
+                  {/* ================================================================== */}
+                  {/* 1. THE PRIMARY WORKSPACE (ROOT NODE) */}
+                  {/* ================================================================== */}
+                  <tr className="hover:bg-neutral-50/60 transition-colors group">
+                    
+                    <td className="px-6 py-5">
+                      <div className="flex gap-3">
+                        <div className="mt-1 text-neutral-400">
+                          <ChevronDown size={18} />
                         </div>
-                        <p className="text-base font-medium text-neutral-900">No portfolios found</p>
-                        <p className="text-sm text-neutral-500">Adjust your search or filters to see results.</p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-neutral-900 text-base">{portfolio.mainAccount.business_name}</p>
+                          </div>
+                          <p className="text-[11px] text-neutral-400 mt-0.5 font-mono">
+                            ID: {portfolio.mainAccount.id.split('-')[0]} • Reg: {new Date(portfolio.mainAccount.created_at).toLocaleDateString()}
+                          </p>
+                          
+                          <div className="mt-3 flex items-start gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100 w-max pr-6">
+                            <div className="h-8 w-8 rounded bg-neutral-800 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
+                              {portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+                            </div>
+                            <div className="flex flex-col justify-center">
+                              <span className="text-xs font-bold text-neutral-900">{portfolio.ownerDetails?.full_name || 'Unknown Owner'}</span>
+                              <span className="text-[10px] text-neutral-500 flex items-center gap-1.5 mt-0.5">
+                                <Mail size={10} className="text-neutral-400" /> {portfolio.ownerDetails?.email || 'No email'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    
+                    <td className="px-6 py-5 align-top pt-6">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">
+                        Primary Workspace
+                      </span>
+                    </td>
+                    
+                    <td className="px-6 py-5 align-top pt-6">
+                      {renderPlanAndBilling(portfolio.mainAccount)}
+                    </td>
+                    
+                    <td className="px-6 py-5 align-top pt-6">
+                      {renderSystemStatus(portfolio.mainAccount)}
+                    </td>
+                    
+                    <td className="px-6 py-5 align-top pt-6 text-right">
+                      <div className="flex flex-col items-end gap-2.5">
+                        
+                        {/* Owner Actions */}
+                        <div className="flex items-center gap-1.5 pb-2.5 border-b border-neutral-100 w-full justify-end">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Owner Controls:</span>
+                          <OwnerProfileDialog owner={portfolio.ownerDetails} businesses={[portfolio.mainAccount, ...portfolio.subAccounts]} />
+                          {portfolio.ownerDetails?.id && (
+                            <ManageOrgLimitButton ownerId={portfolio.ownerDetails.id} ownerName={portfolio.ownerDetails.full_name || 'Unknown'} currentLimit={portfolio.ownerDetails.max_businesses_limit || 1} />
+                          )}
+                        </div>
+
+                        {/* Workspace Actions */}
+                        <div className="flex items-center gap-1.5 w-full justify-end">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Workspace Setup:</span>
+                          {portfolio.mainAccount.status === 'pending' ? (
+                            <ApproveTenantDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} />
+                          ) : (
+                            <>
+                              <ManageBillingDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentStatus={portfolio.mainAccount.subscription_status || 'trial'} />
+                              <ManageFeaturesButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentReceiptStatus={portfolio.mainAccount.allow_receipt_uploads !== false} />
+                              <ManageLimitButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentLimit={portfolio.mainAccount.max_staff_limit ?? 1} />
+                            </>
+                          )}
+                        </div>
+
                       </div>
                     </td>
                   </tr>
-                ) : (
-                  processedPortfolios.map((portfolio, pIndex) => (
-                    <React.Fragment key={portfolio.ownerDetails?.id || pIndex}>
-                      
-                      {/* ================================================================== */}
-                      {/* 1. THE OWNER PORTFOLIO HEADER ROW */}
-                      {/* ================================================================== */}
-                      <tr className="bg-neutral-100/60 border-y border-neutral-200">
-                        <td colSpan={5} className="px-6 py-3.5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <div className="h-10 w-10 rounded-md bg-neutral-800 text-white flex items-center justify-center font-bold text-sm shadow-sm ring-2 ring-white">
-                                {portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}
-                              </div>
-                              <div>
-                                <p className="font-bold text-neutral-900 text-base flex items-center gap-2">
-                                  {portfolio.ownerDetails?.full_name || 'Unassigned / Unknown Owner'}
-                                </p>
-                                <div className="flex items-center gap-3 text-xs text-neutral-500 mt-0.5">
-                                  <span className="flex items-center gap-1"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> {portfolio.ownerDetails?.email || 'No email registered'}</span>
-                                  {portfolio.ownerDetails?.mobile_number && (
-                                    <span className="flex items-center gap-1 border-l border-neutral-300 pl-3"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg> {portfolio.ownerDetails.mobile_number}</span>
-                                  )}
-                                </div>
-                              </div>
+
+                  {/* ================================================================== */}
+                  {/* 2. THE ORGANIZATIONS (CHILD NODES) */}
+                  {/* ================================================================== */}
+                  {portfolio.subAccounts.map((biz, index) => {
+                    const isLast = index === portfolio.subAccounts.length - 1;
+
+                    return (
+                      <tr key={biz.id} className="hover:bg-neutral-50/80 transition-colors group bg-neutral-50/40">
+                        
+                        <td className="px-6 py-4 relative pl-[52px]">
+                          <div className={`absolute left-[29px] top-0 w-[2px] bg-neutral-200 transition-all ${isLast ? 'h-[24px]' : 'h-full'}`}></div>
+                          <div className="absolute left-[29px] top-[24px] w-[14px] h-[2px] bg-neutral-200 transition-all"></div>
+
+                          {/* THE FIX: Added Explicit Owner Association to Sub-Accounts */}
+                          <div className="ml-14">
+                            <p className="font-bold text-neutral-700 text-sm">{biz.business_name}</p>
+                            <div className="flex flex-col gap-0.5 mt-1">
+                              <p className="text-[10px] text-neutral-500 font-medium">
+                                ↳ Attached to: <span className="text-neutral-700">{portfolio.ownerDetails?.email || 'Unknown Owner'}</span>
+                              </p>
+                              <p className="text-[10px] text-neutral-400 font-mono">
+                                ID: {biz.id.split('-')[0]} • Reg: {new Date(biz.created_at).toLocaleDateString()}
+                              </p>
                             </div>
-                            
-                            {portfolio.ownerDetails?.id && (
-                              <ManageOrgLimitButton 
-                                ownerId={portfolio.ownerDetails.id} 
-                                ownerName={portfolio.ownerDetails.full_name || 'Unknown'} 
-                                currentLimit={portfolio.ownerDetails.max_businesses_limit || 1} 
-                              />
-                            )}
                           </div>
                         </td>
+
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-200 text-neutral-600 border border-neutral-300">
+                            Sub-Workspace
+                          </span>
+                        </td>
+
+                        <td className="px-6 py-4">
+                          {renderPlanAndBilling(biz)}
+                        </td>
+
+                        <td className="px-6 py-4">
+                          {renderSystemStatus(biz)}
+                        </td>
+
+                        <td className="px-6 py-4 text-right">
+                          {biz.status === 'pending' ? (
+                            <ApproveTenantDialog businessId={biz.id} businessName={biz.business_name} />
+                          ) : (
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[280px] ml-auto">
+                              <ManageBillingDialog businessId={biz.id} businessName={biz.business_name} currentStatus={biz.subscription_status || 'trial'} />
+                              <ManageFeaturesButton businessId={biz.id} businessName={biz.business_name} currentReceiptStatus={biz.allow_receipt_uploads !== false} />
+                              <ManageLimitButton businessId={biz.id} businessName={biz.business_name} currentLimit={biz.max_staff_limit ?? 1} />
+                            </div>
+                          )}
+                        </td>
                       </tr>
-
-                      {/* ================================================================== */}
-                      {/* 2. THE CHILD WORKSPACE ROWS */}
-                      {/* ================================================================== */}
-                      {portfolio.businesses.map((biz) => {
-                        // THE FIX: We identify the Main Account structurally, independent of filtering!
-                        const isMainAccount = biz.id === portfolio.mainAccountId; 
-                        
-                        const hasReceipts = biz.allow_receipt_uploads !== false; 
-                        const subStatus = biz.subscription_status || 'trial';
-                        const isTrial = subStatus === 'trial';
-                        const isActive = subStatus === 'active';
-                        const isSuspended = subStatus === 'suspended';
-                        const isCanceled = subStatus === 'canceled';
-                        const isPastDue = subStatus === 'past_due';
-
-                        let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
-                        if (isTrial) badgeColor = "bg-blue-50 text-blue-700 border-blue-200";
-                        if (isActive) badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                        if (isPastDue) badgeColor = "bg-amber-50 text-amber-700 border-amber-200";
-                        if (isSuspended || isCanceled) badgeColor = "bg-red-50 text-red-700 border-red-200";
-
-                        return (
-                          <tr key={biz.id} className="hover:bg-neutral-50/80 transition-colors group">
-                            
-                            <td className="px-6 py-4 pl-12 relative">
-                              <div className="absolute left-6 top-0 bottom-0 w-px bg-neutral-200"></div>
-                              <div className="absolute left-6 top-1/2 w-4 h-px bg-neutral-200"></div>
-                              
-                              <p className="font-bold text-neutral-900">{biz.business_name}</p>
-                              <p className="text-xs text-neutral-400 mt-1 font-mono">ID: {biz.id.split('-')[0]}</p>
-                            </td>
-                            
-                            <td className="px-6 py-4">
-                              {isMainAccount ? (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-900 text-white shadow-sm">
-                                  Main Account
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-200 text-neutral-600 border border-neutral-300">
-                                  Sub-Account
-                                </span>
-                              )}
-                            </td>
-
-                            <td className="px-6 py-4">
-                              {biz.status === 'pending' ? (
-                                <span className="text-xs text-neutral-400 italic">Awaiting Provisioning</span>
-                              ) : (
-                                <div className="flex flex-col items-start gap-1.5">
-                                  <div className="flex gap-2 items-center">
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-900 text-white shadow-sm">
-                                      {biz.subscription_tier || 'ESSENTIAL'}
-                                    </span>
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${badgeColor}`}>
-                                      {subStatus}
-                                    </span>
-                                  </div>
-                                  
-                                  {isTrial && biz.trial_ends_at && (
-                                    <span className="text-[11px] font-medium text-blue-600 mt-1">
-                                      Expires: {new Date(biz.trial_ends_at).toLocaleDateString()}
-                                    </span>
-                                  )}
-                                  {isActive && (
-                                    <span className="text-[11px] font-medium text-emerald-600 mt-1">Good Standing</span>
-                                  )}
-                                  {(isSuspended || isCanceled || isPastDue) && (
-                                    <span className="text-[11px] font-medium text-red-600 mt-1 animate-pulse">Account Locked</span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="px-6 py-4">
-                              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${
-                                biz.status === 'active' 
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200 border' 
-                                  : 'bg-neutral-100 text-neutral-600 border border-neutral-200'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full mr-2 ${biz.status === 'active' ? 'bg-emerald-500' : 'bg-neutral-400'}`}></span>
-                                {biz.status ? biz.status : 'UNKNOWN'}
-                              </span>
-                            </td>
-
-                            <td className="px-6 py-4 text-right">
-                              {biz.status === 'pending' ? (
-                                <ApproveTenantDialog businessId={biz.id} businessName={biz.business_name} />
-                              ) : (
-                                <div className="flex items-center justify-end gap-2 flex-wrap max-w-[280px] ml-auto">
-                                  <ManageBillingDialog 
-                                    businessId={biz.id} 
-                                    businessName={biz.business_name}
-                                    currentStatus={subStatus}
-                                  />
-                                  <ManageFeaturesButton 
-                                    businessId={biz.id} 
-                                    businessName={biz.business_name}
-                                    currentReceiptStatus={hasReceipts}
-                                  />
-                                  <ManageLimitButton 
-                                    businessId={biz.id} 
-                                    businessName={biz.business_name} 
-                                    currentLimit={biz.max_staff_limit ?? 1} 
-                                  />
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
+                    );
+                  })}
+                </tbody>
+              ))
+            )}
+          </table>
+        </div>
       </Card>
     </div>
   );
