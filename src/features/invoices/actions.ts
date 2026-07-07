@@ -5,20 +5,16 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit"; 
-
-// THE FIX: Import the Centralized API Defense Guard
 import { verifyActiveSubscription } from "@/lib/subscription";
 
 // ============================================================================
-// 1. CREATE INVOICE
+// 1. CREATE INVOICE & AUTO-DEDUCT STOCK (WITH RECIPES)
 // ============================================================================
 export async function createOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) throw new Error("Unauthorized");
-
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
@@ -43,8 +39,12 @@ export async function createOfficialInvoice(formData: FormData) {
 
   if (invoiceError) throw new Error(invoiceError.message);
 
+  const displayId = invoice.id.split('-')[0].toUpperCase();
+
+  // 1. Insert Invoice Items
   const formattedItems = items.map((item: any) => ({
     invoice_id: invoice.id,
+    item_id: item.item_id || null, 
     description: item.description,
     quantity: item.quantity,
     unit_price: item.unit_price,
@@ -54,7 +54,54 @@ export async function createOfficialInvoice(formData: FormData) {
   const { error: itemsError } = await supabase.from("invoice_items").insert(formattedItems);
   if (itemsError) throw new Error(itemsError.message);
 
-  const displayId = invoice.id.split('-')[0].toUpperCase();
+  // --- THE FIX FOR MADE-TO-ORDER COMPOSITES ---
+  const compositeItemIds = items.filter((i: any) => i.item_id).map((i: any) => i.item_id);
+  let recipes: any[] = [];
+  
+  if (compositeItemIds.length > 0) {
+    const { data: fetchedRecipes } = await supabase.from("recipe_ingredients").select("*").in("composite_item_id", compositeItemIds);
+    if (fetchedRecipes) recipes = fetchedRecipes;
+  }
+
+  const itemsWithRecipes = recipes.map(r => r.composite_item_id);
+
+  // 2. INVENTORY LEDGER: Base Deductions (Only deduct items that DO NOT have recipes)
+  const stockMovements: any[] = items
+    .filter((item: any) => item.item_id && !itemsWithRecipes.includes(item.item_id)) 
+    .map((item: any) => ({
+      business_id: businessId,
+      item_id: item.item_id,
+      type: 'STOCK_OUT',
+      quantity: item.quantity,
+      reference_id: invoice.id,
+      reference_type: 'INVOICE',
+      created_by: user.id,
+      notes: `Auto-deducted for Invoice #${displayId}`
+    }));
+
+  // 3. RECIPE ENGINE: Deduct ONLY the RAW MATERIALS for composite items
+  if (recipes.length > 0) {
+    items.forEach((item: any) => {
+      const itemRecipes = recipes.filter((r: any) => r.composite_item_id === item.item_id);
+      itemRecipes.forEach((recipe: any) => {
+        stockMovements.push({
+          business_id: businessId,
+          item_id: recipe.raw_material_item_id,
+          type: 'STOCK_OUT',
+          quantity: recipe.quantity_required * item.quantity, // Recipe requirement * Qty sold
+          reference_id: invoice.id,
+          reference_type: 'RECIPE_DEDUCTION',
+          created_by: user.id,
+          notes: `Recipe deduction for ${item.description} (Invoice #${displayId})`
+        });
+      });
+    });
+  }
+
+  // Execute all stock deductions instantly
+  if (stockMovements.length > 0) {
+    await supabase.from("stock_movements").insert(stockMovements); 
+  }
 
   await logSecurityEvent({
     businessId: businessId as string, actorId: user.id, action: "CREATED_INVOICE", tableName: "invoices", recordId: invoice.id,
@@ -62,19 +109,17 @@ export async function createOfficialInvoice(formData: FormData) {
   });
 
   revalidatePath("/invoices");
+  revalidatePath("/inventory"); 
   redirect(`/invoices/${invoice.id}`);
 }
 
 // ============================================================================
-// 2. UPDATE INVOICE
+// 2. UPDATE INVOICE & RECONCILE STOCK (WITH RECIPES)
 // ============================================================================
 export async function updateOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
@@ -89,78 +134,145 @@ export async function updateOfficialInvoice(formData: FormData) {
 
   if (!items || items.length === 0) throw new Error("Invoices must have at least one item.");
 
+  const displayId = id.split('-')[0].toUpperCase();
   const totalAmount = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
 
+  // 1. INVENTORY LEDGER: Safely REVERT old stock using the exact historical stock movements!
+  const { data: oldMovements } = await supabase.from("stock_movements")
+    .select("item_id, quantity")
+    .eq("reference_id", id)
+    .eq("type", "STOCK_OUT"); 
+
+  if (oldMovements && oldMovements.length > 0) {
+    const stockRestorations = oldMovements.map(mov => ({
+      business_id: businessId, 
+      item_id: mov.item_id, 
+      type: 'STOCK_IN', 
+      quantity: mov.quantity, 
+      reference_id: id, 
+      reference_type: 'INVOICE_EDIT', 
+      created_by: user.id, 
+      notes: `Stock restored during edit of Invoice #${displayId}`
+    }));
+    await supabase.from("stock_movements").insert(stockRestorations);
+  }
+
+  // 2. Update Invoice metadata
   const { error: invoiceError } = await supabase.from("invoices").update({ 
     client_name: clientName, due_date: dueDate, status: status, total_amount: totalAmount 
   }).eq("id", id).eq("business_id", businessId);
-
   if (invoiceError) throw new Error(invoiceError.message);
 
+  // 3. Replace Invoice line items
   await supabase.from("invoice_items").delete().eq("invoice_id", id); 
-  
   const formattedItems = items.map((item: any) => ({
-    invoice_id: id, description: item.description, quantity: item.quantity, unit_price: item.unit_price, total_price: item.quantity * item.unit_price
+    invoice_id: id, item_id: item.item_id || null, description: item.description, quantity: item.quantity, unit_price: item.unit_price, total_price: item.quantity * item.unit_price
   }));
-
   const { error: itemsError } = await supabase.from("invoice_items").insert(formattedItems); 
   if (itemsError) throw new Error(itemsError.message);
 
-  const displayId = id.split('-')[0].toUpperCase();
+  // --- THE FIX FOR MADE-TO-ORDER COMPOSITES (DURING EDIT) ---
+  const compositeItemIds = items.filter((i: any) => i.item_id).map((i: any) => i.item_id);
+  let recipes: any[] = [];
+  
+  if (compositeItemIds.length > 0) {
+    const { data: fetchedRecipes } = await supabase.from("recipe_ingredients").select("*").in("composite_item_id", compositeItemIds);
+    if (fetchedRecipes) recipes = fetchedRecipes;
+  }
+
+  const itemsWithRecipes = recipes.map(r => r.composite_item_id);
+
+  // 4. INVENTORY LEDGER: Base Deductions (Only deduct items that DO NOT have recipes)
+  const stockDeductions: any[] = items
+    .filter((i: any) => i.item_id && !itemsWithRecipes.includes(i.item_id))
+    .map((i: any) => ({
+      business_id: businessId, item_id: i.item_id, type: 'STOCK_OUT', quantity: i.quantity, reference_id: id, reference_type: 'INVOICE_EDIT', created_by: user.id, notes: `Auto-deducted from edit of Invoice #${displayId}`
+    }));
+
+  // 5. RECIPE ENGINE: Deduct ONLY the RAW MATERIALS for composite items
+  if (recipes.length > 0) {
+    items.forEach((item: any) => {
+      const itemRecipes = recipes.filter((r: any) => r.composite_item_id === item.item_id);
+      itemRecipes.forEach((recipe: any) => {
+        stockDeductions.push({
+          business_id: businessId, item_id: recipe.raw_material_item_id, type: 'STOCK_OUT', quantity: recipe.quantity_required * item.quantity, reference_id: id, reference_type: 'RECIPE_DEDUCTION', created_by: user.id, notes: `Recipe deduction for ${item.description} (Invoice #${displayId})`
+        });
+      });
+    });
+  }
+
+  if (stockDeductions.length > 0) {
+    await supabase.from("stock_movements").insert(stockDeductions);
+  }
 
   await logSecurityEvent({
-    businessId: businessId as string, actorId: user.id, action: "EDITED_INVOICE", tableName: "invoices", recordId: id,
-    details: { invoice_number: displayId, client_name: clientName, new_total: totalAmount, new_status: status }
+    businessId: businessId as string, actorId: user.id, action: "EDITED_INVOICE", tableName: "invoices", recordId: id, details: { invoice_number: displayId, client_name: clientName, new_total: totalAmount, new_status: status }
   });
 
   revalidatePath("/invoices");
+  revalidatePath("/inventory"); 
   redirect(`/invoices/${id}`);
 }
 
 // ============================================================================
-// 3. DELETE INVOICE
+// 3. DELETE INVOICE & RESTORE STOCK (WITH RECIPES)
 // ============================================================================
 export async function deleteOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const id = formData.get("id") as string;
-
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
+  
   if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') {
     throw new Error("Security Violation: Staff members are not permitted to delete invoices.");
   }
 
   const { data: targetRecord } = await supabase.from("invoices").select("*").eq("id", id).single();
+  const displayId = id.split('-')[0].toUpperCase();
+
+  // 1. INVENTORY LEDGER: Safely RESTORE old stock using the exact historical stock movements!
+  const { data: oldMovements } = await supabase.from("stock_movements")
+    .select("item_id, quantity")
+    .eq("reference_id", id)
+    .eq("type", "STOCK_OUT"); 
+
+  if (oldMovements && oldMovements.length > 0) {
+    const stockRestorations = oldMovements.map(mov => ({
+      business_id: profile.business_id, 
+      item_id: mov.item_id, 
+      type: 'STOCK_IN', 
+      quantity: mov.quantity, 
+      reference_id: id, 
+      reference_type: 'INVOICE_VOID', 
+      created_by: user.id, 
+      notes: `Stock restored from deleted Invoice #${displayId}`
+    }));
+    await supabase.from("stock_movements").insert(stockRestorations);
+  }
+
+  // 2. Delete invoice records
   await supabase.from("invoice_items").delete().eq("invoice_id", id);
   const { error } = await supabase.from("invoices").delete().eq("id", id).eq("business_id", profile.business_id);
   if (error) throw new Error(error.message);
 
-  const displayId = id.split('-')[0].toUpperCase();
-
   await logSecurityEvent({
-    businessId: profile.business_id as string, actorId: user.id, action: "DELETED_INVOICE", tableName: "invoices", recordId: id,
-    details: { invoice_number: displayId, client_name: targetRecord?.client_name, amount: targetRecord?.total_amount }
+    businessId: profile.business_id as string, actorId: user.id, action: "DELETED_INVOICE", tableName: "invoices", recordId: id, details: { invoice_number: displayId, client_name: targetRecord?.client_name, amount: targetRecord?.total_amount }
   });
 
   revalidatePath("/invoices");
+  revalidatePath("/inventory"); 
 }
 
 // ============================================================================
-// 4. RECORD INVOICE PAYMENT
+// 4. RECORD INVOICE PAYMENT (UNCHANGED)
 // ============================================================================
 export async function recordInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
@@ -212,15 +324,12 @@ export async function recordInvoicePayment(formData: FormData) {
 }
 
 // ============================================================================
-// 5. UPDATE INVOICE PAYMENT
+// 5. UPDATE INVOICE PAYMENT (UNCHANGED)
 // ============================================================================
 export async function updateInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
@@ -263,15 +372,12 @@ export async function updateInvoicePayment(formData: FormData) {
 }
 
 // ============================================================================
-// 6. DELETE INVOICE PAYMENT (OWNERS ONLY)
+// 6. DELETE INVOICE PAYMENT (OWNERS ONLY) (UNCHANGED)
 // ============================================================================
 export async function deleteInvoicePayment(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
@@ -313,15 +419,12 @@ export async function deleteInvoicePayment(formData: FormData) {
 }
 
 // ============================================================================
-// 7. REQUEST PAYMENT VOID (THE MAKER)
+// 7. REQUEST PAYMENT VOID (THE MAKER) (UNCHANGED)
 // ============================================================================
 export async function requestPaymentVoid(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
@@ -351,22 +454,19 @@ export async function requestPaymentVoid(formData: FormData) {
 }
 
 // ============================================================================
-// 8. RESOLVE PAYMENT VOID (THE CHECKER)
+// 8. RESOLVE PAYMENT VOID (THE CHECKER) (UNCHANGED)
 // ============================================================================
 export async function resolvePaymentVoid(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  
   if (!user) throw new Error("Unauthorized");
-  
-  // INJECT THE ZERO-TRUST API GUARD
   await verifyActiveSubscription(user.id);
 
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user.id).single();
   if (profile?.role !== 'business_owner' && profile?.role !== 'super_admin') throw new Error("Unauthorized");
 
   const request_id = formData.get("request_id") as string;
-  const action = formData.get("action") as string; // 'approve' or 'reject'
+  const action = formData.get("action") as string; 
 
   const { data: voidRequest } = await supabase.from("payment_void_requests").select("*").eq("id", request_id).single();
   if (!voidRequest) throw new Error("Request not found");

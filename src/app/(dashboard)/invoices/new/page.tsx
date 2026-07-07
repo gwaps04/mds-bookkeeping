@@ -42,6 +42,17 @@ export default async function NewInvoicePage() {
     .eq("business_id", profile?.business_id)
     .order("name");
 
+  // ============================================================================
+  // THE FIX: Fetch BOTH Sellable Simple and Composite Menu Items!
+  // ============================================================================
+  const { data: inventoryItems } = await supabase
+    .from("items")
+    .select("id, name, selling_price")
+    .eq("business_id", profile?.business_id)
+    .eq("is_archived", false) // Ensures deleted items don't show up in the dropdown
+    .in("type", ["SELLABLE_SIMPLE", "SELLABLE_COMPOSITE"])
+    .order("name");
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center gap-4">
@@ -53,8 +64,8 @@ export default async function NewInvoicePage() {
         </div>
       </div>
 
-      {/* RENDER THE INTERACTIVE CLIENT COMPONENT */}
-      <InvoiceForm customers={customers || []} />
+      {/* Pass BOTH customers and inventory items to the form */}
+      <InvoiceForm customers={customers || []} inventoryItems={inventoryItems || []} />
     </div>
   );
 }
