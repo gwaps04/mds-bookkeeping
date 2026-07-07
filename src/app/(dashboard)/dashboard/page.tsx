@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { reviewRefund } from "@/features/refunds/actions";
 import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
-// Added TrendingUp for the Net Income card
-import { Wallet, Receipt, CreditCard, Activity, Landmark, Banknote, TrendingUp } from "lucide-react"; 
+// Added new icons for COGS and Gross Profit
+import { Wallet, Receipt, CreditCard, Activity, Landmark, Banknote, TrendingUp, PackageMinus, Target } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -34,11 +34,22 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const canSeeNetCash = isOwner || bizData?.show_net_cash_to_staff !== false;
   const canSeeTaxes = isTaxEnabled && (isOwner || bizData?.show_taxes_to_staff === true);
 
-  // 2. Fetch Raw Data
+  // 2. Fetch Raw Data (Income, Expenses, Invoices)
   const { data: incomeData } = await supabase.from("income").select("id, amount, date, description, customers(name)").eq("business_id", businessId);
   const { data: expenseData } = await supabase.from("expenses").select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)").eq("business_id", businessId);
   const { data: invoiceData } = await supabase.from("invoices").select("total_amount, status, income(amount)").eq("business_id", businessId);
   
+  // ============================================================================
+  // THE NEW FIX: FETCH COST OF GOODS SOLD (COGS) DYNAMICALLY
+  // ============================================================================
+  const { data: cogsData } = await supabase
+    .from("stock_movements")
+    .select("id, quantity, created_at, items!inner(unit_cost)")
+    .eq("business_id", businessId)
+    .eq("type", "STOCK_OUT")
+    .in("reference_type", ["INVOICE", "RECIPE_DEDUCTION"]);
+  // ============================================================================
+
   // 3. Pending Refunds Engine
   const { data: rawRefunds } = await supabase.from("refund_requests").select("id, amount, reason, created_at, requested_by").eq("business_id", businessId).eq("status", "pending");
   let pendingRefunds: any[] = rawRefunds || [];
@@ -52,9 +63,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     });
   }
 
-  // ============================================================================
   // 4. THE TIMEZONE-PROOF TEMPORAL ENGINE
-  // ============================================================================
   const now = new Date();
   const isDefaultState = !params.month && !params.year;
   const selectedMonth = params.month === 'all' ? 'all' : parseInt(params.month || String(now.getMonth() + 1));
@@ -62,6 +71,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   const isInPeriod = (dateString: string) => {
     if (!dateString) return false;
+    // Both date strings (YYYY-MM-DD) and timestamps (YYYY-MM-DDTHH:MM:SSZ) work here!
     const itemYear = dateString.substring(0, 4);
     const itemMonth = dateString.substring(5, 7);
 
@@ -81,12 +91,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   }
 
   // ============================================================================
-  // 5. ACCUMULATOR ENGINE
+  // 5. THE ADVANCED ACCUMULATOR ENGINE
   // ============================================================================
   let totalIncomeAllTime = 0; 
   let totalExpensesAllTime = 0; 
   
   let periodIncome = 0; 
+  let periodCogs = 0; // NEW: Track Cost of Goods Sold
   let periodExpenses = 0; 
   let periodTransactions = 0; 
   let periodTaxesPaid = 0; 
@@ -96,6 +107,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   
   const recentActivity: any[] = [];
 
+  // A. Process Income
   (incomeData || []).forEach((inc) => {
     const amt = Number(inc.amount);
     totalIncomeAllTime += amt; 
@@ -107,6 +119,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }
   });
 
+  // B. Process COGS (Cost of Goods Sold)
+  (cogsData || []).forEach((mov) => {
+    if (isInPeriod(mov.created_at)) {
+      // Multiply the quantity depleted by the unit cost of that specific item
+      periodCogs += (Number(mov.quantity) * Number((mov.items as any)?.unit_cost || 0));
+    }
+  });
+
+  // C. Process Operating Expenses
   (expenseData || []).forEach((exp) => {
     const amt = Number(exp.amount);
     totalExpensesAllTime += amt; 
@@ -119,6 +140,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }
   });
 
+  // D. Process Unpaid Invoices
   (invoiceData || []).forEach((inv) => {
     if (inv.status === 'sent') {
       const remainingBalance = Math.max(0, Number(inv.total_amount) - (inv.income as any[] || []).reduce((sum, p) => sum + Number(p.amount), 0));
@@ -126,9 +148,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }
   });
 
-  // THE BALANCES
-  const totalCashAllTime = totalIncomeAllTime - totalExpensesAllTime; // Card 1 (Liquidity)
-  const periodNetIncome = periodIncome - periodExpenses; // NEW Card 4 (P&L Performance)
+  // THE ENTERPRISE FINANCIAL MATH
+  const totalCashAllTime = totalIncomeAllTime - totalExpensesAllTime; 
+  const periodGrossProfit = periodIncome - periodCogs; 
+  const periodNetIncome = periodGrossProfit - periodExpenses; // True Net Income
   
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const top5Activity = recentActivity.slice(0, 5);
@@ -149,7 +172,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <DashboardFilter />
       </div>
 
-      {/* Grid updated to max 4 columns for stable wrapping of 7 cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
         
         {/* CARD 1: THE LIQUIDITY ANCHOR (Strictly All-Time) */}
@@ -171,12 +193,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Link>
         )}
 
-        {/* CARD 2: TOTAL INCOME (Follows Period Filter) */}
+        {/* CARD 2: TOTAL INCOME */}
         <Link href={`/income?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Total Income</CardTitle>
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Total Revenue</CardTitle>
               <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Banknote size={16} /></div>
             </CardHeader>
             <CardContent>
@@ -190,12 +212,50 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 3: TOTAL EXPENSES (Follows Period Filter) */}
+        {/* NEW CARD 3: COST OF GOODS SOLD (COGS) */}
+        <Link href={`/inventory?month=${selectedMonth}&year=${selectedYear}`} className="block group">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-amber-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Cost of Goods (COGS)</CardTitle>
+              <div className="p-1.5 bg-amber-50 text-amber-600 rounded-md shrink-0"><PackageMinus size={16} /></div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={formatCurrency(periodCogs)}>
+                {formatCurrency(periodCogs)}
+              </div>
+              <p className="text-[9px] sm:text-[10px] text-amber-700 mt-1.5 font-bold uppercase tracking-widest bg-amber-50 border border-amber-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
+                {periodLabel}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* NEW CARD 4: GROSS PROFIT */}
+        <Link href={`/dashboard?month=${selectedMonth}&year=${selectedYear}`} className="block group">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Gross Profit</CardTitle>
+              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md shrink-0"><Target size={16} /></div>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl md:text-3xl font-bold tracking-tight truncate ${periodGrossProfit < 0 ? 'text-rose-600' : 'text-neutral-900'}`} title={formatCurrency(periodGrossProfit)}>
+                {formatCurrency(periodGrossProfit)}
+              </div>
+              <p className="text-[9px] sm:text-[10px] text-indigo-700 mt-1.5 font-bold uppercase tracking-widest bg-indigo-50 border border-indigo-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
+                {periodLabel}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* CARD 5: OPERATING EXPENSES */}
         <Link href={`/expenses?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-rose-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Total Expenses</CardTitle>
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Operating Expenses</CardTitle>
               <div className="p-1.5 bg-rose-50 text-rose-600 rounded-md shrink-0"><CreditCard size={16} /></div>
             </CardHeader>
             <CardContent>
@@ -209,12 +269,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* NEW CARD 4: NET INCOME (Follows Period Filter) */}
+        {/* CARD 6: TRUE NET INCOME */}
         <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Net Income</CardTitle>
+              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">True Net Income</CardTitle>
               <div className="p-1.5 bg-teal-50 text-teal-600 rounded-md shrink-0"><TrendingUp size={16} /></div>
             </CardHeader>
             <CardContent>
@@ -228,7 +288,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 5: UNPAID INVOICES (Point in Time) */}
+        {/* CARD 7: UNPAID INVOICES */}
         <Link href="/invoices?status=unpaid" className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -245,26 +305,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 6: TX VOLUME (Follows Period Filter) */}
-        <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[10px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider truncate mr-2">Tx Volume</CardTitle>
-              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md shrink-0"><Activity size={16} /></div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl md:text-3xl font-bold text-neutral-900 tracking-tight truncate" title={String(periodTransactions)}>
-                {periodTransactions}
-              </div>
-              <p className="text-[9px] sm:text-[10px] text-indigo-600 mt-1.5 font-bold uppercase tracking-widest bg-indigo-50 border border-indigo-100 inline-block px-1.5 py-0.5 rounded truncate max-w-full">
-                {periodLabel}
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        {/* CARD 7: TAXES (Follows Period Filter) */}
+        {/* CARD 8: TAXES */}
         {canSeeTaxes && (
           <Link href={`/taxes?month=${selectedMonth}&year=${selectedYear}`} className="block group">
             <Card className="shadow-sm border-neutral-200 bg-white hover:border-orange-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden">
