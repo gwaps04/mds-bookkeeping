@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import ManageLimitButton from "./ManageLimitButton"; 
 import ManageOrgLimitButton from "./ManageOrgLimitButton"; 
 import ManageFeaturesButton from "./ManageFeaturesButton";
+import ManageInventoryButton from "./ManageInventoryButton"; // NEW IMPORT
 import ApproveTenantDialog from "./ApproveTenantDialog";
 import ManageBillingDialog from "./ManageBillingDialog";
 import OwnerProfileDialog from "./OwnerProfileDialog"; 
@@ -98,8 +99,9 @@ export default async function SuperAdminBusinessesPage(props: {
       trial_ends_at,
       created_at,
       max_staff_limit,
-      allow_receipt_uploads
-    `)
+      allow_receipt_uploads,
+      has_inventory_access
+    `) // ADDED has_inventory_access
     .order("created_at", { ascending: true }); 
 
   // Extract unique owner IDs to fetch their permanent identity profiles
@@ -341,7 +343,7 @@ export default async function SuperAdminBusinessesPage(props: {
                         </div>
 
                         {/* Workspace Actions */}
-                        <div className="flex items-center gap-1.5 w-full justify-end">
+                        <div className="flex items-center gap-1.5 w-full justify-end flex-wrap max-w-[400px]">
                           <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Workspace Setup:</span>
                           {portfolio.mainAccount.status === 'pending' ? (
                             <ApproveTenantDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} />
@@ -349,6 +351,10 @@ export default async function SuperAdminBusinessesPage(props: {
                             <>
                               <ManageBillingDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentStatus={portfolio.mainAccount.subscription_status || 'trial'} />
                               <ManageFeaturesButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentReceiptStatus={portfolio.mainAccount.allow_receipt_uploads !== false} />
+                              
+                              {/* INJECTED BUTTON HERE */}
+                              <ManageInventoryButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_inventory_access} />
+
                               <ManageLimitButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentLimit={portfolio.mainAccount.max_staff_limit ?? 1} />
                             </>
                           )}
@@ -406,6 +412,10 @@ export default async function SuperAdminBusinessesPage(props: {
                             <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[280px] ml-auto">
                               <ManageBillingDialog businessId={biz.id} businessName={biz.business_name} currentStatus={biz.subscription_status || 'trial'} />
                               <ManageFeaturesButton businessId={biz.id} businessName={biz.business_name} currentReceiptStatus={biz.allow_receipt_uploads !== false} />
+                              
+                              {/* INJECTED BUTTON HERE */}
+                              <ManageInventoryButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_inventory_access} />
+
                               <ManageLimitButton businessId={biz.id} businessName={biz.business_name} currentLimit={biz.max_staff_limit ?? 1} />
                             </div>
                           )}

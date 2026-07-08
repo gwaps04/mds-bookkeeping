@@ -14,11 +14,11 @@ interface Company {
 interface SideNavProps {
   role?: string;
   isTaxEnabled?: boolean;
+  hasInventoryAccess?: boolean; // THE FIX: Added the new ERP provisioning flag
   companies?: Company[];
   activeCompanyId?: string;
 }
 
-// THE FIX: Explicitly define the shape of our Navigation Items
 interface NavItem {
   name: string;
   href: string;
@@ -27,23 +27,19 @@ interface NavItem {
   style?: "tax" | "audit" | string;
 }
 
-// THE FIX: Explicitly define the shape of our Navigation Groups
 interface NavGroup {
   title: string;
   items: NavItem[];
 }
 
-export default function SideNav({ role, isTaxEnabled, companies = [], activeCompanyId }: SideNavProps) {
+// THE FIX: Destructure the new hasInventoryAccess prop
+export default function SideNav({ role, isTaxEnabled, hasInventoryAccess, companies = [], activeCompanyId }: SideNavProps) {
   const pathname = usePathname();
   const isSuperAdmin = role === 'super_admin';
   const isBusinessOwner = role === 'business_owner';
 
   const checkActive = (path: string) => pathname === path || (pathname.startsWith(path) && path !== '/dashboard');
 
-  // ============================================================================
-  // INFORMATION ARCHITECTURE (IA) CONFIGURATION
-  // THE FIX: Apply the NavGroup[] type to force TypeScript compliance
-  // ============================================================================
   const navGroups: NavGroup[] = isSuperAdmin ? [
     {
       title: "Super Admin",
@@ -75,7 +71,8 @@ export default function SideNav({ role, isTaxEnabled, companies = [], activeComp
       items: [
         { name: "Client Directory", href: "/clients" },
         { name: "Business Planner", href: "/planner", isPro: true },
-        { name: "Inventory", href: "/inventory", isPro: true },
+        // THE FIX: Conditionally render the Inventory module!
+        ...(hasInventoryAccess ? [{ name: "Inventory", href: "/inventory", isPro: true }] : []),
         { name: "Payroll", href: "/payroll", isPro: true },
         { name: "Reports", href: "/reports", isPro: true },
       ]
@@ -108,19 +105,16 @@ export default function SideNav({ role, isTaxEnabled, companies = [], activeComp
         {navGroups.map((group, groupIdx) => (
           <div key={groupIdx} className="mb-6">
             
-            {/* CATEGORY HEADER */}
             <h3 className="px-3 text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
               {group.title}
             </h3>
             
-            {/* CATEGORY LINKS */}
             <div className="space-y-1">
               {group.items.map((item, itemIdx) => {
                 const active = checkActive(item.href);
                 
                 let baseClasses = "flex items-center justify-between px-3 py-2 text-sm rounded-md transition-colors ";
                 
-                // TypeScript now knows these properties are safely optional!
                 if (item.disabled) {
                   baseClasses += "text-neutral-400 cursor-not-allowed font-medium";
                 } else if (item.style === 'tax') {
@@ -143,7 +137,6 @@ export default function SideNav({ role, isTaxEnabled, companies = [], activeComp
                   <Link key={itemIdx} href={item.href} className={baseClasses}>
                     <span>{item.name}</span>
                     
-                    {/* PRO PLAN BADGE */}
                     {item.isPro && (
                       <span className="flex items-center gap-1 bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-700 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest shadow-sm border border-amber-200/50">
                         <Crown size={10} className="fill-amber-500 text-amber-600" /> Pro
