@@ -19,9 +19,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login");
 
   // --- DATABASE FETCH ---
+  // THE FIX: Added has_inventory_access to the businesses subquery!
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered)")
+    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access)")
     .eq("id", user.id)
     .single();
 
@@ -34,8 +35,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const businessStatus = Array.isArray(bizData) ? bizData[0]?.status : bizData?.status;
   const rawBusinessName = Array.isArray(bizData) ? bizData[0]?.business_name : bizData?.business_name;
   
-  // --- THE SMART TOGGLE ---
+  // --- THE SMART TOGGLES ---
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
+  // THE FIX: Extracted the inventory access flag securely
+  const hasInventoryAccess = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
 
   // --- WORKSPACE FETCH ---
   let ownedCompanies: any[] = [];
@@ -95,6 +98,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <SideNav 
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
+          hasInventoryAccess={hasInventoryAccess} // THE FIX: Passed the prop to SideNav!
           companies={ownedCompanies} 
           activeCompanyId={profile?.business_id} 
         />
