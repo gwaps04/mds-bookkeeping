@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { reviewRefund } from "@/features/refunds/actions";
 import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
-import { Wallet, Receipt, CreditCard, Activity, Landmark, Banknote, TrendingUp, PackageMinus, Target, PackageX, ArrowRight } from "lucide-react"; 
+import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, PackageMinus, Target, PackageX, ArrowRight } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -150,34 +150,31 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
       
-      {/* HEADER WITH WRAPPING TEXT */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="w-full md:flex-1 pr-4">
-          {/* THE FIX: Replaced truncate with text-balance to ensure long names wrap gracefully */}
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-neutral-900 text-balance">
+      {/* THE FIX: Fluid heading typography that scales down smoothly on mobile */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="w-full lg:flex-1 pr-4">
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">
             Hi, {businessName}.
           </h2>
-          <p className="text-sm md:text-base text-neutral-500 mt-1">Welcome to your financial command center.</p>
+          <p className="text-xs sm:text-sm md:text-base text-neutral-500 mt-1">Welcome to your financial command center.</p>
         </div>
-        <div className="w-full md:w-auto shrink-0">
+        <div className="w-full lg:w-auto shrink-0">
           <DashboardFilter />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         
-        {/* CARD 1: THE LIQUIDITY ANCHOR */}
         {canSeeNetCash && (
           <Link href="/transactions" className="block group">
-            <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+            <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
               <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
               <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Net Cash Balance</CardTitle>
+                <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Net Cash Balance</CardTitle>
                 <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Wallet size={16} /></div>
               </CardHeader>
               <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-                {/* THE FIX: Replaced truncate with break-words so huge numbers don't clip on mobile */}
-                <div className={`text-2xl md:text-3xl font-black tracking-tight break-words leading-none pb-1 ${totalCashAllTime < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
+                <div className={`text-2xl sm:text-3xl font-black tracking-tight break-words leading-none pb-1 ${totalCashAllTime < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
                   {formatCurrency(totalCashAllTime)}
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-neutral-400 mt-2 uppercase tracking-widest font-bold">ALL TIME</p>
@@ -186,16 +183,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Link>
         )}
 
-        {/* CARD 2: TOTAL INCOME */}
         <Link href={`/income?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-emerald-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Total Revenue</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Total Revenue</CardTitle>
               <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Banknote size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className="text-2xl md:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
                 {formatCurrency(periodIncome)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-emerald-700 mt-2 font-bold uppercase tracking-widest bg-emerald-50 border border-emerald-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -205,16 +201,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 3: COST OF GOODS SOLD (COGS) */}
         <Link href={`/inventory?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-amber-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-amber-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Cost of Goods (COGS)</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Cost of Goods (COGS)</CardTitle>
               <div className="p-1.5 bg-amber-50 text-amber-600 rounded-md shrink-0"><PackageMinus size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className="text-2xl md:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
                 {formatCurrency(periodCogs)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-amber-700 mt-2 font-bold uppercase tracking-widest bg-amber-50 border border-amber-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -224,16 +219,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 4: GROSS PROFIT */}
         <Link href={`/dashboard?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-indigo-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Gross Profit</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Gross Profit</CardTitle>
               <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md shrink-0"><Target size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className={`text-2xl md:text-3xl font-black tracking-tight break-words leading-none pb-1 ${periodGrossProfit < 0 ? 'text-rose-600' : 'text-neutral-900'}`}>
+              <div className={`text-2xl sm:text-3xl font-black tracking-tight break-words leading-none pb-1 ${periodGrossProfit < 0 ? 'text-rose-600' : 'text-neutral-900'}`}>
                 {formatCurrency(periodGrossProfit)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-indigo-700 mt-2 font-bold uppercase tracking-widest bg-indigo-50 border border-indigo-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -243,16 +237,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 5: OPERATING EXPENSES */}
         <Link href={`/expenses?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-rose-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-rose-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-rose-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Operating Expenses</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Operating Expenses</CardTitle>
               <div className="p-1.5 bg-rose-50 text-rose-600 rounded-md shrink-0"><CreditCard size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className="text-2xl md:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
                 {formatCurrency(periodExpenses)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-rose-600 mt-2 font-bold uppercase tracking-widest bg-rose-50 border border-rose-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -262,16 +255,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 6: TRUE NET INCOME */}
         <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">True Net Income</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">True Net Income</CardTitle>
               <div className="p-1.5 bg-teal-50 text-teal-600 rounded-md shrink-0"><TrendingUp size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className={`text-2xl md:text-3xl font-black tracking-tight break-words leading-none pb-1 ${periodNetIncome < 0 ? 'text-rose-600' : 'text-neutral-900'}`}>
+              <div className={`text-2xl sm:text-3xl font-black tracking-tight break-words leading-none pb-1 ${periodNetIncome < 0 ? 'text-rose-600' : 'text-neutral-900'}`}>
                 {formatCurrency(periodNetIncome)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-teal-700 mt-2 font-bold uppercase tracking-widest bg-teal-50 border border-teal-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -281,16 +273,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 7: UNPAID INVOICES */}
         <Link href="/invoices?status=unpaid" className="block group">
-          <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+          <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
             <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Unpaid Invoices</CardTitle>
+              <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Unpaid Invoices</CardTitle>
               <div className="p-1.5 bg-blue-50 text-blue-600 rounded-md shrink-0"><Receipt size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-              <div className="text-2xl md:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+              <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
                 {formatCurrency(unpaidInvoicesTotal)}
               </div>
               <p className="text-[10px] sm:text-xs text-blue-600 font-medium mt-2 break-words">{unpaidInvoicesCount} invoice(s) pending</p>
@@ -298,17 +289,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* CARD 8: TAXES */}
         {canSeeTaxes && (
           <Link href={`/taxes?month=${selectedMonth}&year=${selectedYear}`} className="block group">
-            <Card className="shadow-sm border-neutral-200 bg-white hover:border-orange-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1">
+            <Card className="shadow-sm border-neutral-200 bg-white hover:border-orange-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-0 sm:p-1">
               <div className="absolute top-0 left-0 w-full h-1 bg-orange-500 opacity-0 group-hover:opacity-100 transition-opacity" />
               <CardHeader className="pb-2 pt-4 px-4 md:px-5 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-[11px] sm:text-xs font-semibold text-neutral-500 uppercase tracking-wider">Taxes Paid</CardTitle>
+                <CardTitle className="text-[10px] sm:text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Taxes Paid</CardTitle>
                 <div className="p-1.5 bg-orange-50 text-orange-600 rounded-md shrink-0"><Landmark size={16} /></div>
               </CardHeader>
               <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
-                <div className="text-2xl md:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+                <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
                   {formatCurrency(periodTaxesPaid)}
                 </div>
                 <p className="text-[9px] sm:text-[10px] text-orange-600 mt-2 font-bold uppercase tracking-widest bg-orange-50 border border-orange-100 inline-block px-1.5 py-0.5 rounded break-words">
@@ -320,9 +310,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         )}
       </div>
 
-      {/* THE LOW STOCK ALERTS ENGINE */}
       {hasInventoryAccess && lowStockItems.length > 0 && (
-        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-5 md:p-6 shadow-sm relative overflow-hidden">
+        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 md:p-6 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-5 text-9xl pointer-events-none transform translate-x-4 -translate-y-8">⚠️</div>
           
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 relative z-10">
@@ -331,13 +320,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 {lowStockItems.length}
               </span>
               <div>
-                <h3 className="text-xl font-bold text-red-900 tracking-tight">Low Stock Alerts</h3>
-                <p className="text-sm text-red-700">The following items have fallen below their reorder threshold.</p>
+                <h3 className="text-lg md:text-xl font-bold text-red-900 tracking-tight">Low Stock Alerts</h3>
+                <p className="text-xs md:text-sm text-red-700">The following items have fallen below their reorder threshold.</p>
               </div>
             </div>
-            {/* THE FIX: Button stretches on mobile, h-11 for touch targets */}
             <Link href="/inventory" className="w-full sm:w-auto">
-              <Button variant="outline" className="w-full sm:w-auto h-11 md:h-10 bg-white text-red-700 border-red-200 hover:bg-red-100">
+              <Button variant="outline" className="w-full sm:w-auto h-11 md:h-10 bg-white text-red-700 border-red-200 hover:bg-red-100 font-semibold">
                 View Inventory <ArrowRight size={14} className="ml-2" />
               </Button>
             </Link>
@@ -354,8 +342,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="font-black text-red-600 text-base">{Number(item.quantity_on_hand).toLocaleString()} <span className="text-xs font-normal">{item.unit_of_measure}</span></p>
-                  <p className="text-[10px] text-neutral-400">Min: {item.reorder_threshold}</p>
+                  <p className="font-black text-red-600 text-base">{Number(item.quantity_on_hand).toLocaleString()} <span className="text-[10px] font-normal text-neutral-500 uppercase tracking-widest">{item.unit_of_measure}</span></p>
                 </div>
               </div>
             ))}
@@ -363,15 +350,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      {/* THE EXECUTIVE APPROVAL QUEUE (REFUNDS) */}
       {isOwner && pendingRefunds.length > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-5 md:p-6 shadow-sm relative overflow-hidden">
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 md:p-6 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-5 text-9xl pointer-events-none transform translate-x-4 -translate-y-8">🔔</div>
           <div className="flex items-center gap-3 mb-5 relative z-10">
             <span className="flex h-10 w-10 md:h-8 md:w-8 items-center justify-center rounded-full bg-amber-600 text-white text-base md:text-sm font-bold shadow-sm shrink-0">{pendingRefunds.length}</span>
             <div>
-              <h3 className="text-xl font-bold text-amber-900 tracking-tight">Pending Approvals</h3>
-              <p className="text-sm text-amber-700">Staff members have requested the following financial actions.</p>
+              <h3 className="text-lg md:text-xl font-bold text-amber-900 tracking-tight">Pending Approvals</h3>
+              <p className="text-xs md:text-sm text-amber-700">Staff members have requested the following financial actions.</p>
             </div>
           </div>
           <div className="space-y-3 relative z-10">
@@ -385,7 +371,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   <p className="font-bold text-neutral-900 text-xl md:text-lg break-words leading-none pb-1">{formatCurrency(Number(refund.amount))}</p>
                   <p className="text-sm text-neutral-600 mt-2 break-words">Requested by <span className="font-semibold text-neutral-900">{refund.requester_name}</span> • Reason: {refund.reason}</p>
                 </div>
-                {/* THE FIX: Buttons stretch full width on mobile, stack beautifully, h-11 targets */}
                 <div className="flex flex-col sm:flex-row items-center gap-2 md:gap-3 w-full md:w-auto shrink-0 mt-2 md:mt-0">
                   <form action={async () => { "use server"; await reviewRefund(refund.id, 'reject'); }} className="w-full sm:w-auto">
                     <Button type="submit" variant="outline" className="w-full sm:w-32 h-11 md:h-10 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 text-sm font-semibold">Reject</Button>
@@ -400,11 +385,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      {/* RECENT ACTIVITY FEED */}
       <div className="mt-8">
-        <h3 className="text-lg font-semibold text-neutral-900 mb-4">Recent Activity ({periodLabel})</h3>
+        <h3 className="text-base sm:text-lg font-semibold text-neutral-900 mb-4">Recent Activity ({periodLabel})</h3>
         <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden">
-          {/* THE FIX: Ensure table scrolls horizontally on small screens without breaking layout */}
           <div className="overflow-x-auto scroll-smooth w-full">
             <table className="w-full text-left text-sm min-w-[600px]">
               <thead className="bg-neutral-50/80 border-b border-neutral-200">

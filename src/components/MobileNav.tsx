@@ -1,154 +1,49 @@
-// src/components/SideNav.tsx
+// src/components/MobileNav.tsx
 "use client";
 
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import WorkspaceSwitcher from "./WorkspaceSwitcher";
-import { Crown } from "lucide-react";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Menu } from "lucide-react";
+import SideNav from "./SideNav"; // We import the SideNav to render INSIDE the drawer
 
-interface Company {
-  id: string;
-  business_name: string;
-}
-
-interface SideNavProps {
-  role?: string;
-  isTaxEnabled?: boolean;
-  hasInventoryAccess?: boolean; // THE FIX: Added the new ERP provisioning flag
-  companies?: Company[];
-  activeCompanyId?: string;
-}
-
-interface NavItem {
-  name: string;
-  href: string;
-  isPro?: boolean;
-  disabled?: boolean;
-  style?: "tax" | "audit" | string;
-}
-
-interface NavGroup {
-  title: string;
-  items: NavItem[];
-}
-
-// THE FIX: Destructure the new hasInventoryAccess prop
-export default function SideNav({ role, isTaxEnabled, hasInventoryAccess, companies = [], activeCompanyId }: SideNavProps) {
+export default function MobileNav(props: any) {
+  const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const isSuperAdmin = role === 'super_admin';
-  const isBusinessOwner = role === 'business_owner';
 
-  const checkActive = (path: string) => pathname === path || (pathname.startsWith(path) && path !== '/dashboard');
-
-  const navGroups: NavGroup[] = isSuperAdmin ? [
-    {
-      title: "Super Admin",
-      items: [
-        { name: "Tenant Approvals", href: "/admin/businesses" },
-        { name: "System Logs", href: "#", disabled: true }
-      ]
-    }
-  ] : [
-    {
-      title: "Overview",
-      items: [
-        { name: "Dashboard", href: "/dashboard" }
-      ]
-    },
-    {
-      title: "Finance",
-      items: [
-        { name: "Chart of Accounts", href: "/accounts" },
-        { name: "Transactions", href: "/transactions" },
-        { name: "Invoices", href: "/invoices" },
-        { name: "Income & Sales", href: "/income" },
-        { name: "Expenses", href: "/expenses" },
-        ...(isTaxEnabled ? [{ name: "BIR Tax Tracker", href: "/taxes", style: "tax" }] : [])
-      ]
-    },
-    {
-      title: "Business",
-      items: [
-        { name: "Client Directory", href: "/clients" },
-        { name: "Business Planner", href: "/planner", isPro: true },
-        // THE FIX: Conditionally render the Inventory module!
-        ...(hasInventoryAccess ? [{ name: "Inventory", href: "/inventory", isPro: true }] : []),
-        { name: "Payroll", href: "/payroll", isPro: true },
-        { name: "Reports", href: "/reports", isPro: true },
-      ]
-    },
-    ...(isBusinessOwner ? [{
-      title: "Administration",
-      items: [
-        { name: "Team Management", href: "/team" },
-        { name: "Business Settings", href: "/settings" },
-        { name: "Security & Audit", href: "/audit", style: "audit" },
-      ]
-    }] : [])
-  ];
+  // Smart routing: Automatically close the mobile drawer when a user taps a link!
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <Sheet open={open} onOpenChange={setOpen}>
       
-      {/* WORKSPACE SWITCHER */}
-      {isBusinessOwner && companies.length > 0 && activeCompanyId && (
-        <div className="px-4 pt-6 pb-2">
-          <WorkspaceSwitcher 
-            companies={companies} 
-            activeCompanyId={activeCompanyId} 
-          />
+      {/* THE 44px TOUCH TARGET RULE ENFORCED */}
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="md:hidden h-11 w-11 -ml-2 text-neutral-900 hover:bg-neutral-100 shrink-0">
+          <Menu size={24} />
+          <span className="sr-only">Toggle Mobile Menu</span>
+        </Button>
+      </SheetTrigger>
+      
+      {/* OFF-CANVAS DRAWER */}
+      <SheetContent side="left" className="p-0 w-[280px] sm:w-[320px] bg-white flex flex-col z-[100]">
+        <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+        <SheetDescription className="sr-only">Access the main navigation and workspace switcher.</SheetDescription>
+        
+        <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0 bg-white">
+          <span className="font-bold text-xl tracking-tight text-neutral-900">MacroBiz</span>
         </div>
-      )}
+        
+        {/* We inject your existing SideNav component directly into the mobile drawer. 
+            Because it receives the companies prop now, the Workspace Switcher will automatically render! */}
+        <div className="flex-1 overflow-y-auto">
+          <SideNav {...props} />
+        </div>
+      </SheetContent>
 
-      {/* CATEGORIZED NAVIGATION ENGINE */}
-      <nav className={`flex-1 px-4 overflow-y-auto ${!isBusinessOwner ? 'py-6' : 'pb-6 pt-2'}`}>
-        {navGroups.map((group, groupIdx) => (
-          <div key={groupIdx} className="mb-6">
-            
-            <h3 className="px-3 text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
-              {group.title}
-            </h3>
-            
-            <div className="space-y-1">
-              {group.items.map((item, itemIdx) => {
-                const active = checkActive(item.href);
-                
-                let baseClasses = "flex items-center justify-between px-3 py-2 text-sm rounded-md transition-colors ";
-                
-                if (item.disabled) {
-                  baseClasses += "text-neutral-400 cursor-not-allowed font-medium";
-                } else if (item.style === 'tax') {
-                  baseClasses += active 
-                    ? "bg-blue-100 text-blue-900 border border-blue-200 font-bold shadow-sm" 
-                    : "bg-blue-50/50 text-blue-700 border border-blue-100 font-medium hover:bg-blue-100";
-                } else if (item.style === 'audit') {
-                  baseClasses += active 
-                    ? "bg-red-100 text-red-900 font-bold shadow-sm" 
-                    : "bg-red-50/50 text-red-700 font-medium hover:bg-red-100";
-                } else {
-                  baseClasses += active 
-                    ? "bg-neutral-100 text-neutral-900 font-bold shadow-sm" 
-                    : "text-neutral-600 font-medium hover:bg-neutral-50 hover:text-neutral-900";
-                }
-
-                return item.disabled ? (
-                  <div key={itemIdx} className={baseClasses}>{item.name}</div>
-                ) : (
-                  <Link key={itemIdx} href={item.href} className={baseClasses}>
-                    <span>{item.name}</span>
-                    
-                    {item.isPro && (
-                      <span className="flex items-center gap-1 bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-700 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest shadow-sm border border-amber-200/50">
-                        <Crown size={10} className="fill-amber-500 text-amber-600" /> Pro
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </nav>
-    </div>
+    </Sheet>
   );
 }

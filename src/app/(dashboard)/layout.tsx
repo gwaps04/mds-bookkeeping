@@ -8,8 +8,6 @@ import UserProfile from "@/components/UserProfile";
 import SideNav from "@/components/SideNav";
 import Footer from "@/components/Footer"; 
 import RealtimeSync from "@/components/RealtimeSync";
-
-// THE FIX: Imported the SaaS Banner
 import { SaaSLockoutBanner } from "@/components/SaaSLockoutBanner";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -18,15 +16,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect("/login");
 
-  // --- DATABASE FETCH ---
-  // THE FIX: Added has_inventory_access to the businesses subquery!
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access)")
     .eq("id", user.id)
     .single();
 
-  // --- THE RBAC IDENTITY ENGINE ---
   const isSuperAdmin = profile?.role === 'super_admin';
   const isBusinessOwner = profile?.role === 'business_owner';
   const isStaff = profile?.role === 'staff';
@@ -35,12 +30,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const businessStatus = Array.isArray(bizData) ? bizData[0]?.status : bizData?.status;
   const rawBusinessName = Array.isArray(bizData) ? bizData[0]?.business_name : bizData?.business_name;
   
-  // --- THE SMART TOGGLES ---
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
-  // THE FIX: Extracted the inventory access flag securely
   const hasInventoryAccess = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
 
-  // --- WORKSPACE FETCH ---
   let ownedCompanies: any[] = [];
   if (isBusinessOwner) {
     const { data: companies } = await supabase
@@ -52,30 +44,20 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (companies) ownedCompanies = companies;
   }
 
-  // Prepare data for the User Profile Dropdown
   const displayRole = isSuperAdmin ? 'Super Admin' : isStaff ? 'Staff' : 'Business Owner';
   const displayBusinessName = isSuperAdmin ? 'MacroBiz System Control' : (rawBusinessName || 'Pending Business');
 
-  if (!isSuperAdmin && !profile?.business_id) {
-    redirect("/onboarding");
-  }
+  if (!isSuperAdmin && !profile?.business_id) redirect("/onboarding");
 
-  // The Waiting Room
   if (!isSuperAdmin && businessStatus === 'pending') {
     return (
       <div className="min-h-screen bg-neutral-50 flex items-center justify-center p-4">
         <Card className="max-w-md w-full shadow-lg text-center p-6">
-          <CardHeader>
-            <CardTitle className="text-2xl">Account Pending</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-2xl">Account Pending</CardTitle></CardHeader>
           <CardContent className="text-neutral-500 space-y-6">
             <p>Your business tenant has been provisioned successfully.</p>
             <p>MacroBiz Administration is currently reviewing the registration. You will be granted access to the ledger once approved.</p>
-            <form action={logout}>
-              <button type="submit" className="text-sm font-medium text-red-600 hover:underline">
-                Sign Out
-              </button>
-            </form>
+            <form action={logout}><button type="submit" className="text-sm font-medium text-red-600 hover:underline">Sign Out</button></form>
           </CardContent>
         </Card>
       </div>
@@ -84,8 +66,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
-     
-      {/* INJECT THE REALTIME NOTIFICATION BELL GLOBALLY */}
       <RealtimeSync />
 
       {/* DESKTOP SIDEBAR */}
@@ -93,16 +73,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MacroBiz</h1>
         </div>
-        
-        {/* INJECT THE INTELLIGENT SIDEBAR COMPONENT */}
         <SideNav 
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
-          hasInventoryAccess={hasInventoryAccess} // THE FIX: Passed the prop to SideNav!
+          hasInventoryAccess={hasInventoryAccess} 
           companies={ownedCompanies} 
           activeCompanyId={profile?.business_id} 
         />
-        
         <div className="p-4 border-t border-neutral-200 shrink-0">
           <form action={logout}>
             <button type="submit" className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors">
@@ -116,10 +93,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="flex-1 flex flex-col min-w-0">
         
         {/* TOP HEADER */}
-        <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-6 justify-between shrink-0 print:hidden">
-          <div className="flex items-center gap-2 md:hidden">
-            <MobileNav role={profile?.role} isTaxEnabled={isTaxEnabled} />
-            <span className="font-bold text-lg tracking-tight">MacroBiz</span>
+        <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-4 md:px-6 justify-between shrink-0 print:hidden relative z-30">
+          <div className="flex items-center gap-3 md:hidden">
+            {/* THE FIX: Fully loaded MobileNav with all Props! */}
+            <MobileNav 
+              role={profile?.role} 
+              isTaxEnabled={isTaxEnabled} 
+              hasInventoryAccess={hasInventoryAccess}
+              companies={ownedCompanies} 
+              activeCompanyId={profile?.business_id} 
+            />
+            <span className="font-bold text-lg tracking-tight text-neutral-900">MacroBiz</span>
           </div>
 
           <div className="ml-auto flex items-center space-x-4">
@@ -132,24 +116,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        {/* ============================================================================ */}
-        {/* THE SAAS BILLING GATEWAY */}
-        {/* ============================================================================ */}
-        <div className="print:hidden">
+        <div className="print:hidden relative z-20">
           <SaaSLockoutBanner />
         </div>
 
-        {/* PAGE CONTENT & FOOTER WRAPPER */}
-        <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white relative">
-          
-          <div className="flex-1 p-6 md:p-8 w-full max-w-6xl mx-auto print:p-0 relative z-0">
+        {/* THE FIX: Replaced p-6 with p-4 sm:p-6 md:p-8 to save massive space on mobile phones! */}
+        <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white relative z-10">
+          <div className="flex-1 p-4 sm:p-6 md:p-8 w-full max-w-7xl mx-auto print:p-0">
             {children}
           </div>
-          
-          <div className="print:hidden">
-            <Footer />
-          </div>
-
+          <div className="print:hidden"><Footer /></div>
         </main>
       </div>
     </div>
