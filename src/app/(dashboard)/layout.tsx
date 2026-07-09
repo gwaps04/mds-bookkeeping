@@ -16,9 +16,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect("/login");
 
+  // THE FIX: Fetching has_payroll_access from the database
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access)")
+    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access, has_payroll_access)")
     .eq("id", user.id)
     .single();
 
@@ -32,6 +33,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
   const hasInventoryAccess = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
+  const hasPayrollAccess = Array.isArray(bizData) ? bizData[0]?.has_payroll_access : bizData?.has_payroll_access; // THE FIX: Extracted flag
 
   let ownedCompanies: any[] = [];
   if (isBusinessOwner) {
@@ -77,6 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
           hasInventoryAccess={hasInventoryAccess} 
+          hasPayrollAccess={hasPayrollAccess} // THE FIX: Passed to desktop nav
           companies={ownedCompanies} 
           activeCompanyId={profile?.business_id} 
         />
@@ -95,11 +98,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* TOP HEADER */}
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-4 md:px-6 justify-between shrink-0 print:hidden relative z-30">
           <div className="flex items-center gap-3 md:hidden">
-            {/* THE FIX: Fully loaded MobileNav with all Props! */}
             <MobileNav 
               role={profile?.role} 
               isTaxEnabled={isTaxEnabled} 
               hasInventoryAccess={hasInventoryAccess}
+              hasPayrollAccess={hasPayrollAccess} // THE FIX: Passed to mobile nav
               companies={ownedCompanies} 
               activeCompanyId={profile?.business_id} 
             />
@@ -120,7 +123,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <SaaSLockoutBanner />
         </div>
 
-        {/* THE FIX: Replaced p-6 with p-4 sm:p-6 md:p-8 to save massive space on mobile phones! */}
         <main className="flex-1 overflow-auto flex flex-col print:overflow-visible print:bg-white relative z-10">
           <div className="flex-1 p-4 sm:p-6 md:p-8 w-full max-w-7xl mx-auto print:p-0">
             {children}

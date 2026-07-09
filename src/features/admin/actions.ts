@@ -50,7 +50,7 @@ export async function approveBusiness(formData: FormData) {
 }
 
 // ============================================================================
-// 2. TOGGLE ERP INVENTORY ACCESS (FEATURE FLAG)
+// 2. TOGGLE ERP INVENTORY ACCESS (Legacy support)
 // ============================================================================
 export async function toggleInventoryAccess(formData: FormData) {
   const adminAuthClient = createAdminClient();
@@ -64,5 +64,45 @@ export async function toggleInventoryAccess(formData: FormData) {
 
   if (error) throw new Error(error.message);
   
+  revalidatePath("/admin/businesses");
+}
+
+// ============================================================================
+// 3. THE UNIFIED SAAS PROVISIONING ENGINE (Payroll, Inventory, Receipts, Planner, Reports)
+// ============================================================================
+export async function updateWorkspaceAccess(formData: FormData) {
+  const adminAuthClient = createAdminClient(); // Uses the secure Service Role!
+
+  const businessId = formData.get("business_id") as string;
+  const feature = formData.get("feature") as string; 
+  const action = formData.get("action") as string; // 'enable' or 'disable'
+
+  if (!businessId || !feature || !action) throw new Error("Missing required fields");
+
+  const isEnabled = action === "enable";
+
+  // Map the requested feature to the exact database column
+  let updateData: any = {};
+  if (feature === "payroll") {
+    updateData = { has_payroll_access: isEnabled };
+  } else if (feature === "inventory") {
+    updateData = { has_inventory_access: isEnabled };
+  } else if (feature === "receipts") {
+    updateData = { allow_receipt_uploads: isEnabled };
+  } else if (feature === "planner") {
+    updateData = { has_planner_access: isEnabled };
+  } else if (feature === "reports") {
+    updateData = { has_reports_access: isEnabled };
+  } else {
+    throw new Error("Invalid feature requested.");
+  }
+
+  const { error } = await adminAuthClient
+    .from("businesses")
+    .update(updateData)
+    .eq("id", businessId);
+
+  if (error) throw new Error("Database Error: " + error.message);
+
   revalidatePath("/admin/businesses");
 }

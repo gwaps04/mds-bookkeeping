@@ -9,7 +9,10 @@ import { redirect } from "next/navigation";
 import ManageLimitButton from "./ManageLimitButton"; 
 import ManageOrgLimitButton from "./ManageOrgLimitButton"; 
 import ManageFeaturesButton from "./ManageFeaturesButton";
-import ManageInventoryButton from "./ManageInventoryButton"; // NEW IMPORT
+import ManageInventoryButton from "./ManageInventoryButton"; 
+import ManagePayrollButton from "./ManagePayrollButton"; 
+import ManagePlannerButton from "./ManagePlannerButton"; // NEW
+import ManageReportsButton from "./ManageReportsButton"; // NEW
 import ApproveTenantDialog from "./ApproveTenantDialog";
 import ManageBillingDialog from "./ManageBillingDialog";
 import OwnerProfileDialog from "./OwnerProfileDialog"; 
@@ -83,9 +86,6 @@ export default async function SuperAdminBusinessesPage(props: {
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user?.id).single();
   if (profile?.role !== 'super_admin') redirect("/dashboard");
 
-  // ============================================================================
-  // 1. THE DECOUPLED DATA FETCH (Fixes the "Unknown Owner" bug)
-  // ============================================================================
   const { data: businesses } = await supabase
     .from("businesses")
     .select(`
@@ -100,11 +100,13 @@ export default async function SuperAdminBusinessesPage(props: {
       created_at,
       max_staff_limit,
       allow_receipt_uploads,
-      has_inventory_access
-    `) // ADDED has_inventory_access
+      has_inventory_access,
+      has_payroll_access,
+      has_planner_access,
+      has_reports_access
+    `)
     .order("created_at", { ascending: true }); 
 
-  // Extract unique owner IDs to fetch their permanent identity profiles
   const ownerIds = Array.from(new Set((businesses || []).map(b => b.owner_id).filter(Boolean)));
   
   const { data: profiles } = await supabase
@@ -114,33 +116,20 @@ export default async function SuperAdminBusinessesPage(props: {
 
   const profilesMap = new Map((profiles || []).map(p => [p.id, p]));
 
-  // ============================================================================
-  // 2. THE IN-MEMORY DATA PIPELINE & GROUPING ENGINE
-  // ============================================================================
   const portfoliosMap = new Map<string, { ownerDetails: any; mainAccountId: string; businesses: any[] }>();
 
   (businesses || []).forEach((biz) => {
     const ownerId = biz.owner_id;
-    // Map the business back to the permanent owner profile
     const owner = profilesMap.get(ownerId) || { id: ownerId, full_name: 'Unknown Owner', email: 'No email' };
     
     if (!portfoliosMap.has(ownerId)) {
-      portfoliosMap.set(ownerId, {
-        ownerDetails: owner,
-        mainAccountId: biz.id, // The first one inserted is mathematically the Primary Workspace
-        businesses: []
-      });
+      portfoliosMap.set(ownerId, { ownerDetails: owner, mainAccountId: biz.id, businesses: [] });
     }
     portfoliosMap.get(ownerId)?.businesses.push(biz);
   });
 
-  // ============================================================================
-  // 3. FILTERING & MERGED ROOT ASSIGNMENT
-  // ============================================================================
   let processedPortfolios = Array.from(portfoliosMap.values()).map(portfolio => {
-    
     const mainAccount = portfolio.businesses.find(b => b.id === portfolio.mainAccountId);
-    
     let subAccounts = portfolio.businesses.filter(b => b.id !== portfolio.mainAccountId);
     subAccounts.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
@@ -168,25 +157,13 @@ export default async function SuperAdminBusinessesPage(props: {
       mainMatchesSearch = true; 
     }
 
-    return {
-      ownerDetails: portfolio.ownerDetails,
-      mainAccount: mainAccount,
-      subAccounts: subAccounts,
-      hasMatches: (mainMatchesExact && mainMatchesSearch) || subAccounts.length > 0
-    };
+    return { ownerDetails: portfolio.ownerDetails, mainAccount: mainAccount, subAccounts: subAccounts, hasMatches: (mainMatchesExact && mainMatchesSearch) || subAccounts.length > 0 };
   }).filter(p => p.hasMatches && p.mainAccount); 
 
-  // ============================================================================
-  // 4. EXTERNAL PORTFOLIO SORTING (Latest to Oldest Activity)
-  // ============================================================================
   processedPortfolios.sort((a, b) => {
     const datesA = [new Date(a.mainAccount.created_at).getTime(), ...a.subAccounts.map(biz => new Date(biz.created_at).getTime())];
     const datesB = [new Date(b.mainAccount.created_at).getTime(), ...b.subAccounts.map(biz => new Date(biz.created_at).getTime())];
-    
-    const newestA = Math.max(...datesA);
-    const newestB = Math.max(...datesB);
-    
-    return newestB - newestA; // Sort Descending
+    return Math.max(...datesB) - Math.max(...datesA);
   });
 
   return (
@@ -199,12 +176,10 @@ export default async function SuperAdminBusinessesPage(props: {
       <Card className="shadow-sm border-neutral-200 bg-white">
         <CardContent className="p-4 md:p-5">
           <form method="GET" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
-            
             <div className="lg:col-span-2 space-y-1.5">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Global Search</Label>
               <Input name="search" placeholder="Search owner name, email, phone, or workspace..." defaultValue={params?.search} className="bg-neutral-50 border-neutral-200" />
             </div>
-
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Plan Tier</Label>
               <Select name="tier" defaultValue={params?.tier || "all"}>
@@ -217,7 +192,6 @@ export default async function SuperAdminBusinessesPage(props: {
                 </SelectContent>
               </Select>
             </div>
-
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Billing Status</Label>
               <Select name="billing" defaultValue={params?.billing || "all"}>
@@ -232,19 +206,15 @@ export default async function SuperAdminBusinessesPage(props: {
                 </SelectContent>
               </Select>
             </div>
-
             <div className="space-y-1.5 flex flex-col justify-end gap-2 h-full">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider hidden lg:block">&nbsp;</Label>
               <div className="flex gap-2 w-full">
                 <Button type="submit" className="bg-neutral-900 text-white flex-1 hover:bg-neutral-800 shadow-sm transition-all">Filter</Button>
                 {(params?.search || params?.tier || params?.billing || params?.status) && (
-                  <Link href="/admin/businesses" className="flex-1">
-                    <Button variant="outline" className="text-neutral-500 w-full border-neutral-200 hover:bg-neutral-50 transition-colors">Clear</Button>
-                  </Link>
+                  <Link href="/admin/businesses" className="flex-1"><Button variant="outline" className="text-neutral-500 w-full border-neutral-200 hover:bg-neutral-50 transition-colors">Clear</Button></Link>
                 )}
               </div>
             </div>
-
           </form>
         </CardContent>
       </Card>
@@ -265,15 +235,12 @@ export default async function SuperAdminBusinessesPage(props: {
                 <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Actions</th>
               </tr>
             </thead>
-            
             {processedPortfolios.length === 0 ? (
               <tbody>
                 <tr>
                   <td colSpan={5} className="px-6 py-16 text-center text-neutral-500 bg-white">
                     <div className="flex flex-col items-center justify-center space-y-3">
-                      <div className="p-3 bg-neutral-100 rounded-full text-neutral-400">
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                      </div>
+                      <div className="p-3 bg-neutral-100 rounded-full text-neutral-400"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div>
                       <p className="text-base font-medium text-neutral-900">No workspaces found</p>
                     </div>
                   </td>
@@ -283,67 +250,36 @@ export default async function SuperAdminBusinessesPage(props: {
               processedPortfolios.map((portfolio) => (
                 <tbody key={portfolio.mainAccount.id} className="border-b-[6px] border-neutral-100/80 bg-white">
                   
-                  {/* ================================================================== */}
-                  {/* 1. THE PRIMARY WORKSPACE (ROOT NODE) */}
-                  {/* ================================================================== */}
+                  {/* PRIMARY WORKSPACE (ROOT NODE) */}
                   <tr className="hover:bg-neutral-50/60 transition-colors group">
-                    
                     <td className="px-6 py-5">
                       <div className="flex gap-3">
-                        <div className="mt-1 text-neutral-400">
-                          <ChevronDown size={18} />
-                        </div>
+                        <div className="mt-1 text-neutral-400"><ChevronDown size={18} /></div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-bold text-neutral-900 text-base">{portfolio.mainAccount.business_name}</p>
-                          </div>
-                          <p className="text-[11px] text-neutral-400 mt-0.5 font-mono">
-                            ID: {portfolio.mainAccount.id.split('-')[0]} • Reg: {new Date(portfolio.mainAccount.created_at).toLocaleDateString()}
-                          </p>
-                          
+                          <div className="flex items-center gap-2"><p className="font-bold text-neutral-900 text-base">{portfolio.mainAccount.business_name}</p></div>
+                          <p className="text-[11px] text-neutral-400 mt-0.5 font-mono">ID: {portfolio.mainAccount.id.split('-')[0]} • Reg: {new Date(portfolio.mainAccount.created_at).toLocaleDateString()}</p>
                           <div className="mt-3 flex items-start gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100 w-max pr-6">
-                            <div className="h-8 w-8 rounded bg-neutral-800 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
-                              {portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}
-                            </div>
+                            <div className="h-8 w-8 rounded bg-neutral-800 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">{portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}</div>
                             <div className="flex flex-col justify-center">
                               <span className="text-xs font-bold text-neutral-900">{portfolio.ownerDetails?.full_name || 'Unknown Owner'}</span>
-                              <span className="text-[10px] text-neutral-500 flex items-center gap-1.5 mt-0.5">
-                                <Mail size={10} className="text-neutral-400" /> {portfolio.ownerDetails?.email || 'No email'}
-                              </span>
+                              <span className="text-[10px] text-neutral-500 flex items-center gap-1.5 mt-0.5"><Mail size={10} className="text-neutral-400" /> {portfolio.ownerDetails?.email || 'No email'}</span>
                             </div>
                           </div>
                         </div>
                       </div>
                     </td>
-                    
-                    <td className="px-6 py-5 align-top pt-6">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">
-                        Primary Workspace
-                      </span>
-                    </td>
-                    
-                    <td className="px-6 py-5 align-top pt-6">
-                      {renderPlanAndBilling(portfolio.mainAccount)}
-                    </td>
-                    
-                    <td className="px-6 py-5 align-top pt-6">
-                      {renderSystemStatus(portfolio.mainAccount)}
-                    </td>
-                    
+                    <td className="px-6 py-5 align-top pt-6"><span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">Primary Workspace</span></td>
+                    <td className="px-6 py-5 align-top pt-6">{renderPlanAndBilling(portfolio.mainAccount)}</td>
+                    <td className="px-6 py-5 align-top pt-6">{renderSystemStatus(portfolio.mainAccount)}</td>
                     <td className="px-6 py-5 align-top pt-6 text-right">
                       <div className="flex flex-col items-end gap-2.5">
-                        
-                        {/* Owner Actions */}
                         <div className="flex items-center gap-1.5 pb-2.5 border-b border-neutral-100 w-full justify-end">
                           <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Owner Controls:</span>
                           <OwnerProfileDialog owner={portfolio.ownerDetails} businesses={[portfolio.mainAccount, ...portfolio.subAccounts]} />
-                          {portfolio.ownerDetails?.id && (
-                            <ManageOrgLimitButton ownerId={portfolio.ownerDetails.id} ownerName={portfolio.ownerDetails.full_name || 'Unknown'} currentLimit={portfolio.ownerDetails.max_businesses_limit || 1} />
-                          )}
+                          {portfolio.ownerDetails?.id && <ManageOrgLimitButton ownerId={portfolio.ownerDetails.id} ownerName={portfolio.ownerDetails.full_name || 'Unknown'} currentLimit={portfolio.ownerDetails.max_businesses_limit || 1} />}
                         </div>
-
-                        {/* Workspace Actions */}
-                        <div className="flex items-center gap-1.5 w-full justify-end flex-wrap max-w-[400px]">
+                        {/* THE FIX: Increased max-w to 600px to allow all toggle buttons to wrap cleanly without breaking UI */}
+                        <div className="flex items-center gap-1.5 w-full justify-end flex-wrap max-w-[600px]">
                           <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Workspace Setup:</span>
                           {portfolio.mainAccount.status === 'pending' ? (
                             <ApproveTenantDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} />
@@ -352,69 +288,54 @@ export default async function SuperAdminBusinessesPage(props: {
                               <ManageBillingDialog businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentStatus={portfolio.mainAccount.subscription_status || 'trial'} />
                               <ManageFeaturesButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentReceiptStatus={portfolio.mainAccount.allow_receipt_uploads !== false} />
                               
-                              {/* INJECTED BUTTON HERE */}
+                              <ManagePayrollButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_payroll_access} />
                               <ManageInventoryButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_inventory_access} />
+                              
+                              {/* THE FIX: New Planner & Reports Toggles Injected */}
+                              <ManagePlannerButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_planner_access} />
+                              <ManageReportsButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_reports_access} />
 
                               <ManageLimitButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentLimit={portfolio.mainAccount.max_staff_limit ?? 1} />
                             </>
                           )}
                         </div>
-
                       </div>
                     </td>
                   </tr>
 
-                  {/* ================================================================== */}
-                  {/* 2. THE ORGANIZATIONS (CHILD NODES) */}
-                  {/* ================================================================== */}
+                  {/* SUB-WORKSPACES */}
                   {portfolio.subAccounts.map((biz, index) => {
                     const isLast = index === portfolio.subAccounts.length - 1;
-
                     return (
                       <tr key={biz.id} className="hover:bg-neutral-50/80 transition-colors group bg-neutral-50/40">
-                        
                         <td className="px-6 py-4 relative pl-[52px]">
                           <div className={`absolute left-[29px] top-0 w-[2px] bg-neutral-200 transition-all ${isLast ? 'h-[24px]' : 'h-full'}`}></div>
                           <div className="absolute left-[29px] top-[24px] w-[14px] h-[2px] bg-neutral-200 transition-all"></div>
-
-                          {/* THE FIX: Added Explicit Owner Association to Sub-Accounts */}
                           <div className="ml-14">
                             <p className="font-bold text-neutral-700 text-sm">{biz.business_name}</p>
                             <div className="flex flex-col gap-0.5 mt-1">
-                              <p className="text-[10px] text-neutral-500 font-medium">
-                                ↳ Attached to: <span className="text-neutral-700">{portfolio.ownerDetails?.email || 'Unknown Owner'}</span>
-                              </p>
-                              <p className="text-[10px] text-neutral-400 font-mono">
-                                ID: {biz.id.split('-')[0]} • Reg: {new Date(biz.created_at).toLocaleDateString()}
-                              </p>
+                              <p className="text-[10px] text-neutral-500 font-medium">↳ Attached to: <span className="text-neutral-700">{portfolio.ownerDetails?.email || 'Unknown Owner'}</span></p>
+                              <p className="text-[10px] text-neutral-400 font-mono">ID: {biz.id.split('-')[0]} • Reg: {new Date(biz.created_at).toLocaleDateString()}</p>
                             </div>
                           </div>
                         </td>
-
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-200 text-neutral-600 border border-neutral-300">
-                            Sub-Workspace
-                          </span>
-                        </td>
-
-                        <td className="px-6 py-4">
-                          {renderPlanAndBilling(biz)}
-                        </td>
-
-                        <td className="px-6 py-4">
-                          {renderSystemStatus(biz)}
-                        </td>
-
+                        <td className="px-6 py-4"><span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-neutral-200 text-neutral-600 border border-neutral-300">Sub-Workspace</span></td>
+                        <td className="px-6 py-4">{renderPlanAndBilling(biz)}</td>
+                        <td className="px-6 py-4">{renderSystemStatus(biz)}</td>
                         <td className="px-6 py-4 text-right">
                           {biz.status === 'pending' ? (
                             <ApproveTenantDialog businessId={biz.id} businessName={biz.business_name} />
                           ) : (
-                            <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[280px] ml-auto">
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[600px] ml-auto">
                               <ManageBillingDialog businessId={biz.id} businessName={biz.business_name} currentStatus={biz.subscription_status || 'trial'} />
                               <ManageFeaturesButton businessId={biz.id} businessName={biz.business_name} currentReceiptStatus={biz.allow_receipt_uploads !== false} />
                               
-                              {/* INJECTED BUTTON HERE */}
+                              <ManagePayrollButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_payroll_access} />
                               <ManageInventoryButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_inventory_access} />
+                              
+                              {/* THE FIX: New Planner & Reports Toggles Injected */}
+                              <ManagePlannerButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_planner_access} />
+                              <ManageReportsButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_reports_access} />
 
                               <ManageLimitButton businessId={biz.id} businessName={biz.business_name} currentLimit={biz.max_staff_limit ?? 1} />
                             </div>

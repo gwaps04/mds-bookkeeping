@@ -14,11 +14,17 @@ interface Company {
 interface SideNavProps {
   role?: string;
   isTaxEnabled?: boolean;
-  hasInventoryAccess?: boolean; // THE FIX: Added the new ERP provisioning flag
+  hasInventoryAccess?: boolean; 
+  hasPayrollAccess?: boolean; 
+  hasPlannerAccess?: boolean; // THE FIX: Added permission flags
+  hasReportsAccess?: boolean; // THE FIX: Added permission flags
   companies?: Company[];
   activeCompanyId?: string;
 }
 
+// ==============================================================
+// TYPE INTERFACES
+// ==============================================================
 interface NavItem {
   name: string;
   href: string;
@@ -31,9 +37,19 @@ interface NavGroup {
   title: string;
   items: NavItem[];
 }
+// ==============================================================
 
-// THE FIX: Destructure the new hasInventoryAccess prop
-export default function SideNav({ role, isTaxEnabled, hasInventoryAccess, companies = [], activeCompanyId }: SideNavProps) {
+export default function SideNav({ 
+  role, 
+  isTaxEnabled, 
+  hasInventoryAccess, 
+  hasPayrollAccess, 
+  hasPlannerAccess, 
+  hasReportsAccess, 
+  companies = [], 
+  activeCompanyId 
+}: SideNavProps) {
+  
   const pathname = usePathname();
   const isSuperAdmin = role === 'super_admin';
   const isBusinessOwner = role === 'business_owner';
@@ -63,18 +79,19 @@ export default function SideNav({ role, isTaxEnabled, hasInventoryAccess, compan
         { name: "Invoices", href: "/invoices" },
         { name: "Income & Sales", href: "/income" },
         { name: "Expenses", href: "/expenses" },
-        ...(isTaxEnabled ? [{ name: "BIR Tax Tracker", href: "/taxes", style: "tax" }] : [])
+        ...(isTaxEnabled ? [{ name: "BIR Tax Tracker", href: "/taxes", style: "tax" } as NavItem] : [])
       ]
     },
     {
       title: "Business",
       items: [
         { name: "Client Directory", href: "/clients" },
-        { name: "Business Planner", href: "/planner", isPro: true },
-        // THE FIX: Conditionally render the Inventory module!
-        ...(hasInventoryAccess ? [{ name: "Inventory", href: "/inventory", isPro: true }] : []),
-        { name: "Payroll", href: "/payroll", isPro: true },
-        { name: "Reports", href: "/reports", isPro: true },
+        
+        // THE FIX: All premium modules are now strictly gated by the boolean flags
+        ...(hasPlannerAccess ? [{ name: "Business Planner", href: "/planner", isPro: true } as NavItem] : []),
+        ...(hasInventoryAccess ? [{ name: "Inventory", href: "/inventory", isPro: true } as NavItem] : []),
+        ...(hasPayrollAccess ? [{ name: "Payroll", href: "/payroll", isPro: true } as NavItem] : []),
+        ...(hasReportsAccess ? [{ name: "Reports", href: "/reports", isPro: true } as NavItem] : []),
       ]
     },
     ...(isBusinessOwner ? [{
