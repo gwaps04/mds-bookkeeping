@@ -9,12 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-import { Lock } from "lucide-react"; // THE FIX: Imported icon for visual feedback
+import { Lock } from "lucide-react"; 
 
-// Importing our custom Security Gates!
 import { IncomeEditInterceptor, IncomeDeleteDialog } from "./IncomeActionDialogs";
-
-// THE FIX: Import the SaaS Engine
 import { getTenantAccessLevel } from "@/lib/subscription";
 
 export default async function IncomePage(props: { 
@@ -36,9 +33,6 @@ export default async function IncomePage(props: {
   
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // ============================================================================
-  // 1. THE SAAS SUBSCRIPTION ENGINE
-  // ============================================================================
   const { data: business } = await supabase
     .from("businesses")
     .select("subscription_status, subscription_tier, trial_ends_at")
@@ -46,19 +40,17 @@ export default async function IncomePage(props: {
     .single();
 
   const accessState = getTenantAccessLevel(business);
-  const isLocked = accessState.isLocked; // <-- The Master UI Gate
-
-  // ============================================================================
+  const isLocked = accessState.isLocked;
 
   const { data: accounts } = await supabase
     .from("accounts")
     .select("id, name, type")
     .eq("business_id", profile?.business_id)
-    .in("type", ["asset", "revenue"]) 
+    .in("type", ["asset", "revenue", "equity"]) // THE FIX: Allowed Equity Types
     .order("name");
 
   const bankAccounts = accounts?.filter(a => a.type === "asset") || [];
-  const revenueCategories = accounts?.filter(a => a.type === "revenue") || [];
+  const revenueCategories = accounts?.filter(a => a.type === "revenue" || a.type === "equity") || []; // THE FIX: Added to dropdown
 
   let startDate = params?.from || null;
   let endDate = params?.to || null;
@@ -83,8 +75,8 @@ export default async function IncomePage(props: {
     .select(`
       *,
       customers (name),
-      accounts!income_category_id_fkey (name)
-    `)
+      accounts!income_category_id_fkey (name, type) 
+    `) // THE FIX: Fetched the account type
     .eq("business_id", profile?.business_id)
     .order("date", { ascending: false });
 
@@ -105,12 +97,11 @@ export default async function IncomePage(props: {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
         <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Income & Sales</h2>
-        <p className="text-neutral-500 mt-1">Record instant cash receipts, retail sales, and inbound transfers.</p>
+        <p className="text-neutral-500 mt-1">Record instant cash receipts, retail sales, and capital injections.</p>
       </div>
 
       <div className="grid gap-8 md:grid-cols-3">
         
-        {/* CREATE INCOME FORM */}
         <div className="md:col-span-1">
           <Card className="shadow-sm border-neutral-200 sticky top-8">
             <CardHeader>
@@ -124,8 +115,8 @@ export default async function IncomePage(props: {
               }} className="space-y-4">
                 
                 <div className="space-y-2">
-                  <Label htmlFor="customer_name">Customer / Client</Label>
-                  <Input id="customer_name" name="customer_name" placeholder="e.g. Juan Dela Cruz, Walk-in" required disabled={isLocked} />
+                  <Label htmlFor="customer_name">Customer / Entity</Label>
+                  <Input id="customer_name" name="customer_name" placeholder="e.g. Juan Dela Cruz, Business Owner" required disabled={isLocked} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -140,7 +131,7 @@ export default async function IncomePage(props: {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="category_id">Revenue Category</Label>
+                  <Label htmlFor="category_id">Category (Revenue / Equity)</Label>
                   <Select name="category_id" required disabled={isLocked}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select category..." />
@@ -177,13 +168,12 @@ export default async function IncomePage(props: {
                   <Textarea 
                     id="description" 
                     name="description" 
-                    placeholder="Provide details about this sale..." 
+                    placeholder="Provide details about this transaction..." 
                     className="resize-none h-20"
                     disabled={isLocked}
                   />
                 </div>
 
-                {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
                 {isLocked ? (
                   <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2">
                     <Lock size={16} /> Creation Locked
@@ -235,7 +225,7 @@ export default async function IncomePage(props: {
               <thead className="bg-neutral-50 border-b border-neutral-200">
                 <tr>
                   <th className="px-4 py-4 font-medium text-neutral-900">Date</th>
-                  <th className="px-4 py-4 font-medium text-neutral-900">Customer & Notes</th>
+                  <th className="px-4 py-4 font-medium text-neutral-900">Entity & Notes</th>
                   <th className="px-4 py-4 font-medium text-neutral-900">Category</th>
                   <th className="px-4 py-4 font-medium text-neutral-900 text-right">Amount</th>
                   <th className="px-4 py-4 font-medium text-neutral-900 text-center">Actions</th>
@@ -251,6 +241,7 @@ export default async function IncomePage(props: {
                 ) : (
                   (incomeRecords as any[]).map((inc) => {
                     const clientName = inc.customers?.name || 'Walk-in';
+                    const isEquity = inc.accounts?.type === 'equity'; // THE FIX: Detect Equity
                     
                     return (
                       <tr key={inc.id} className="hover:bg-neutral-50 group transition-colors">
@@ -265,18 +256,18 @@ export default async function IncomePage(props: {
                           )}
                         </td>
                         <td className="px-4 py-4 text-neutral-600">
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                          {/* THE FIX: Purple Badge for Equity! */}
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            isEquity ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-green-50 text-green-700 border border-green-200'
+                          }`}>
                             {inc.accounts?.name || 'Uncategorized'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-right font-medium text-green-600">
+                        <td className={`px-4 py-4 text-right font-medium ${isEquity ? 'text-purple-600' : 'text-green-600'}`}>
                           +{formatCurrency(Number(inc.amount))}
                         </td>
                         <td className="px-4 py-4 text-center">
-                          
                           <div className="flex items-center justify-center gap-2">
-                            
-                            {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
                             {isLocked ? (
                               <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
                                 <Lock size={10} className="mr-1.5" /> Edit
@@ -284,16 +275,9 @@ export default async function IncomePage(props: {
                             ) : (
                               <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
                             )}
-
-                            {/* DELETE: Hidden entirely if locked to prevent visual clutter */}
                             {isOwner && !isLocked && (
-                              <IncomeDeleteDialog 
-                                incomeId={inc.id} 
-                                amount={inc.amount} 
-                                clientName={clientName} 
-                              />
+                              <IncomeDeleteDialog incomeId={inc.id} amount={inc.amount} clientName={clientName} />
                             )}
-
                           </div>
                         </td>
                       </tr>

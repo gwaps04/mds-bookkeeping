@@ -10,7 +10,7 @@ import Link from "next/link";
 import CreateAccountForm from "./CreateAccountForm"; 
 import ArchiveAccountDialog from "./ArchiveAccountDialog"; 
 import SubmitButton from "@/components/SubmitButton"; 
-import { ArchiveRestore, Lock } from "lucide-react"; // THE FIX: Imported Lock icon
+import { ArchiveRestore, Lock, Info } from "lucide-react"; // THE FIX: Imported Info icon
 
 // THE FIX: Import the SaaS Engine
 import { getTenantAccessLevel } from "@/lib/subscription";
@@ -80,10 +80,32 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
         </div>
       </div>
 
+      {/* ============================================================================ */}
+      {/* THE FIX: INJECTED QUICK GUIDE TIPS FOR CHART OF ACCOUNTS */}
+      {/* ============================================================================ */}
+      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
+            <Info size={16} />
+          </div>
+          <div className="w-full">
+            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-2.5">Quick Guide: Understanding Financial Types</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-xs sm:text-sm text-blue-800 leading-relaxed">
+              <p><strong className="font-bold text-blue-950">Asset:</strong> Bank accounts, cash registers, and e-wallets (Where actual money sits).</p>
+              <p><strong className="font-bold text-blue-950">Revenue:</strong> Categories for tracking sales, service income, and business earnings.</p>
+              <p><strong className="font-bold text-blue-950">Expense:</strong> Categories for tracking bills, payroll, and outgoing operational costs.</p>
+              <p><strong className="font-bold text-blue-950">Liability:</strong> Credit cards, loans, or money the business owes to third parties.</p>
+              <p className="md:col-span-2 pt-1.5 mt-1.5 border-t border-blue-200/60">
+                <strong className="font-bold text-blue-950">Equity:</strong> Owner&apos;s capital injections or drawings. <em>(Logging an account here ensures your capital injections add to your Net Cash Balance without inflating your taxable Revenue!)</em>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
         
         <div className="lg:col-span-1">
-          {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE CREATION CARD */}
           {isLocked ? (
             <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8 bg-neutral-50/50">
               <CardHeader>
@@ -213,14 +235,12 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                           <td className="px-4 py-4 text-center">
                             <div className="flex items-center justify-center gap-2">
                               
-                              {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
                               {isLocked ? (
                                 <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
                                   <Lock size={10} className="mr-1.5" /> Locked
                                 </Button>
                               ) : canCreateAccount ? (
                                 isArchiveView ? (
-                                  /* THE RESTORE BUTTON UI */
                                   <form action={async (formData) => {
                                     "use server";
                                     try { await restoreAccount(formData); } catch (e) { console.error(e); }
@@ -233,7 +253,6 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                                     />
                                   </form>
                                 ) : (
-                                  /* THE NORMAL EDIT & SMART ARCHIVE UI */
                                   <>
                                     <Link href={`/accounts/${acc.id}/edit`}>
                                       <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50">Edit</Button>

@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { reviewRefund } from "@/features/refunds/actions";
 import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
-import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, PackageMinus, Target, PackageX, ArrowRight } from "lucide-react"; 
+// THE FIX: Import the new Help Button!
+import DashboardHelpButton from "./DashboardHelpButton"; 
+import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, PackageMinus, Target, PackageX, ArrowRight, Info } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -33,7 +35,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const canSeeNetCash = isOwner || bizData?.show_net_cash_to_staff !== false;
   const canSeeTaxes = isTaxEnabled && (isOwner || bizData?.show_taxes_to_staff === true);
 
-  const { data: incomeData } = await supabase.from("income").select("id, amount, date, description, customers(name)").eq("business_id", businessId);
+  const { data: incomeData } = await supabase
+    .from("income")
+    .select("id, amount, date, description, customers(name), accounts!income_category_id_fkey(type)")
+    .eq("business_id", businessId);
+    
   const { data: expenseData } = await supabase.from("expenses").select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)").eq("business_id", businessId);
   const { data: invoiceData } = await supabase.from("invoices").select("total_amount, status, income(amount)").eq("business_id", businessId);
   
@@ -92,9 +98,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     periodLabel = `${monthNames[selectedMonth as number]} ${selectedYear}`;
   }
 
-  let totalIncomeAllTime = 0; 
+  let totalCashInAllTime = 0; 
   let totalExpensesAllTime = 0; 
-  let periodIncome = 0; 
+  let periodRevenue = 0; 
   let periodCogs = 0; 
   let periodExpenses = 0; 
   let periodTransactions = 0; 
@@ -106,11 +112,24 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   (incomeData || []).forEach((inc) => {
     const amt = Number(inc.amount);
-    totalIncomeAllTime += amt; 
+    const isEquity = (inc.accounts as any)?.type === 'equity';
+    
+    totalCashInAllTime += amt; 
+    
     if (isInPeriod(inc.date)) {
-      periodIncome += amt; 
       periodTransactions++;
-      recentActivity.push({ id: inc.id, type: "income", amount: amt, date: inc.date, party: (inc.customers as any)?.name || "Walk-in Customer", description: inc.description || "Cash Receipt" });
+      recentActivity.push({ 
+        id: inc.id, 
+        type: isEquity ? "equity" : "income", 
+        amount: amt, 
+        date: inc.date, 
+        party: (inc.customers as any)?.name || (isEquity ? "Business Owner" : "Walk-in Customer"), 
+        description: inc.description || (isEquity ? "Capital Injection" : "Cash Receipt") 
+      });
+
+      if (!isEquity) {
+        periodRevenue += amt; 
+      }
     }
   });
 
@@ -138,8 +157,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }
   });
 
-  const totalCashAllTime = totalIncomeAllTime - totalExpensesAllTime; 
-  const periodGrossProfit = periodIncome - periodCogs; 
+  const totalCashAllTime = totalCashInAllTime - totalExpensesAllTime; 
+  const periodGrossProfit = periodRevenue - periodCogs; 
   const periodNetIncome = periodGrossProfit - periodExpenses; 
   
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -150,7 +169,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
       
-      {/* THE FIX: Fluid heading typography that scales down smoothly on mobile */}
+      {/* THE FIX: Added flex-wrap and placed the Help Button next to the Filter! */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="w-full lg:flex-1 pr-4">
           <h2 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">
@@ -158,8 +177,24 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </h2>
           <p className="text-xs sm:text-sm md:text-base text-neutral-500 mt-1">Welcome to your financial command center.</p>
         </div>
-        <div className="w-full lg:w-auto shrink-0">
+        <div className="w-full lg:w-auto shrink-0 flex flex-wrap items-center gap-3">
+          <DashboardHelpButton />
           <DashboardFilter />
+        </div>
+      </div>
+
+      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
+            <Info size={16} />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-1.5">Quick Guide: Reading Your Dashboard</h3>
+            <ul className="text-xs sm:text-sm text-blue-800 space-y-1.5 leading-relaxed list-disc list-inside ml-2">
+              <li><strong>The Time Filter:</strong> Use the dropdowns in the top right to analyze specific months or your entire fiscal year. The metric cards will instantly calculate data for your chosen period[cite: 17].</li>
+              <li><strong>Net Cash vs. Revenue:</strong> <em>Net Cash Balance</em> tracks your absolute Cash flow (all money in minus all money out). <em>Total Revenue</em> strictly tracks sales (it automatically hides personal Equity injections to protect your tax calculations)[cite: 17].</li>
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -192,7 +227,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             </CardHeader>
             <CardContent className="px-4 md:px-5 pb-4 md:pb-5">
               <div className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
-                {formatCurrency(periodIncome)}
+                {formatCurrency(periodRevenue)}
               </div>
               <p className="text-[9px] sm:text-[10px] text-emerald-700 mt-2 font-bold uppercase tracking-widest bg-emerald-50 border border-emerald-100 inline-block px-1.5 py-0.5 rounded break-words">
                 {periodLabel}
@@ -407,12 +442,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <td className="px-5 py-4 text-neutral-500 font-medium">{new Date(activity.date).toLocaleDateString()}</td>
                       <td className="px-5 py-4 font-bold text-neutral-900">{activity.party}</td>
                       <td className="px-5 py-4 text-neutral-600">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] md:text-[11px] uppercase tracking-wider font-bold shadow-sm ${activity.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] md:text-[11px] uppercase tracking-wider font-bold shadow-sm ${
+                          activity.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 
+                          activity.type === 'equity' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 
+                          'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}>
                           {activity.description.length > 35 ? activity.description.substring(0, 35) + '...' : activity.description}
                         </span>
                       </td>
-                      <td className={`px-5 py-4 text-right font-black text-base ${activity.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {activity.type === 'income' ? '+' : '-'}{formatCurrency(activity.amount)}
+                      <td className={`px-5 py-4 text-right font-black text-base ${
+                        activity.type === 'income' ? 'text-emerald-600' : 
+                        activity.type === 'equity' ? 'text-purple-600' : 
+                        'text-rose-600'
+                      }`}>
+                        {activity.type === 'expense' ? '-' : '+'}{formatCurrency(activity.amount)}
                       </td>
                     </tr>
                   ))

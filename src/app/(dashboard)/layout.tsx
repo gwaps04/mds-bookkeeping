@@ -16,10 +16,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) redirect("/login");
 
-  // THE FIX: Fetching has_payroll_access from the database
+  // ==========================================================================================
+  // THE FIX 1: Added has_planner_access and has_reports_access to the database fetch query!
+  // ==========================================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access, has_payroll_access)")
+    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access, has_payroll_access, has_planner_access, has_reports_access)")
     .eq("id", user.id)
     .single();
 
@@ -33,7 +35,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   
   const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
   const hasInventoryAccess = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
-  const hasPayrollAccess = Array.isArray(bizData) ? bizData[0]?.has_payroll_access : bizData?.has_payroll_access; // THE FIX: Extracted flag
+  const hasPayrollAccess = Array.isArray(bizData) ? bizData[0]?.has_payroll_access : bizData?.has_payroll_access; 
+  
+  // ==========================================================================================
+  // THE FIX 2: Extracted the new boolean flags from the data
+  // ==========================================================================================
+  const hasPlannerAccess = Array.isArray(bizData) ? bizData[0]?.has_planner_access : bizData?.has_planner_access;
+  const hasReportsAccess = Array.isArray(bizData) ? bizData[0]?.has_reports_access : bizData?.has_reports_access; 
 
   let ownedCompanies: any[] = [];
   if (isBusinessOwner) {
@@ -75,11 +83,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="h-16 flex items-center px-6 border-b border-neutral-200 shrink-0">
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MacroBiz</h1>
         </div>
+        
+        {/* ========================================================================== */}
+        {/* THE FIX 3: Passed the new props into the Desktop SideNav */}
+        {/* ========================================================================== */}
         <SideNav 
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
           hasInventoryAccess={hasInventoryAccess} 
-          hasPayrollAccess={hasPayrollAccess} // THE FIX: Passed to desktop nav
+          hasPayrollAccess={hasPayrollAccess} 
+          hasPlannerAccess={hasPlannerAccess} 
+          hasReportsAccess={hasReportsAccess} 
           companies={ownedCompanies} 
           activeCompanyId={profile?.business_id} 
         />
@@ -98,11 +112,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
         {/* TOP HEADER */}
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-4 md:px-6 justify-between shrink-0 print:hidden relative z-30">
           <div className="flex items-center gap-3 md:hidden">
+            
+            {/* ========================================================================== */}
+            {/* THE FIX 4: Passed the new props into the MobileNav */}
+            {/* ========================================================================== */}
             <MobileNav 
               role={profile?.role} 
               isTaxEnabled={isTaxEnabled} 
               hasInventoryAccess={hasInventoryAccess}
-              hasPayrollAccess={hasPayrollAccess} // THE FIX: Passed to mobile nav
+              hasPayrollAccess={hasPayrollAccess} 
+              hasPlannerAccess={hasPlannerAccess} 
+              hasReportsAccess={hasReportsAccess} 
               companies={ownedCompanies} 
               activeCompanyId={profile?.business_id} 
             />

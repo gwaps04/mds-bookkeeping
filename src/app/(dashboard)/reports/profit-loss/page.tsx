@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
 import { DashboardFilter } from "@/app/(dashboard)/dashboard/DashboardFilter";
 import { ArrowLeft } from "lucide-react";
-import PrintReportButton from "../components/PrintReportButton"; // THE FIX: Imported the new client button!
+import PrintReportButton from "../components/PrintReportButton"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -26,7 +26,8 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
   const currency = bizData?.currency || "PHP";
 
   // 1. FETCH RAW DATA
-  const { data: incomeData } = await supabase.from("income").select("amount, date, description").eq("business_id", businessId);
+  // THE FIX: Added accounts!income_category_id_fkey(name, type)
+  const { data: incomeData } = await supabase.from("income").select("amount, date, description, accounts!income_category_id_fkey(name, type)").eq("business_id", businessId);
   const { data: expenseData } = await supabase.from("expenses").select("amount, date, accounts!expenses_category_id_fkey(name)").eq("business_id", businessId);
   const { data: cogsData } = await supabase
     .from("stock_movements")
@@ -63,10 +64,15 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
 
   (incomeData || []).forEach((inc) => {
     if (isInPeriod(inc.date)) {
-      const amt = Number(inc.amount);
-      totalRevenue += amt;
-      const cat = inc.description?.toLowerCase().includes('invoice') ? 'B2B Invoice Payments' : 'General Sales / Revenue';
-      revenueGroups[cat] = (revenueGroups[cat] || 0) + amt;
+      // THE FIX: The Equity Exclusion Filter
+      const accountType = (inc.accounts as any)?.type;
+      
+      if (accountType !== 'equity') {
+        const amt = Number(inc.amount);
+        totalRevenue += amt;
+        const cat = (inc.accounts as any)?.name || (inc.description?.toLowerCase().includes('invoice') ? 'B2B Invoice Payments' : 'General Sales / Revenue');
+        revenueGroups[cat] = (revenueGroups[cat] || 0) + amt;
+      }
     }
   });
 
@@ -91,10 +97,8 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
 
   return (
-    // THE FIX: Added print:p-0 print:m-0 print:block so it takes up the whole page when exporting!
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto pb-12 print:p-0 print:m-0 print:space-y-0 print:block print:max-w-none">
       
-      {/* HEADER & CONTROLS - THE FIX: print:hidden entirely removes this section from the PDF */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden mb-6">
         <div className="flex items-center gap-3">
           <Link href="/reports">
@@ -110,13 +114,10 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
         
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
           <DashboardFilter />
-          {/* THE FIX: Replaced the link with our new direct print button */}
           <PrintReportButton />
         </div>
       </div>
 
-      {/* THE FINANCIAL STATEMENT DOCUMENT */}
-      {/* THE FIX: Added print:border-none print:shadow-none to make it look like real paper */}
       <Card className="shadow-sm border-neutral-200 bg-white overflow-hidden print:border-none print:shadow-none print:rounded-none">
         <CardContent className="p-0">
           <div className="bg-neutral-50 border-b border-neutral-200 p-8 text-center print:bg-white print:border-neutral-900 print:border-b-2">
@@ -126,7 +127,6 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
           </div>
 
           <div className="p-8 md:p-12 space-y-8 text-sm">
-            {/* REVENUE SECTION */}
             <div>
               <h3 className="font-bold text-neutral-900 uppercase tracking-wider border-b border-neutral-200 pb-2 mb-4">1. Operating Revenue</h3>
               <div className="space-y-3 pl-4">
@@ -147,7 +147,6 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
               </div>
             </div>
 
-            {/* COST OF GOODS SOLD SECTION */}
             <div>
               <h3 className="font-bold text-neutral-900 uppercase tracking-wider border-b border-neutral-200 pb-2 mb-4">2. Cost of Goods Sold</h3>
               <div className="space-y-3 pl-4">
@@ -162,13 +161,11 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
               </div>
             </div>
 
-            {/* GROSS PROFIT */}
             <div className="flex justify-between items-center bg-indigo-50 border border-indigo-100 p-4 rounded-lg print:bg-white print:border-neutral-300 print:border-y-2 print:rounded-none">
               <span className="font-black text-indigo-900 print:text-neutral-900 uppercase tracking-wider">Gross Profit</span>
               <span className="font-black text-lg text-indigo-700 print:text-neutral-900">{formatCurrency(grossProfit)}</span>
             </div>
 
-            {/* OPERATING EXPENSES SECTION */}
             <div>
               <h3 className="font-bold text-neutral-900 uppercase tracking-wider border-b border-neutral-200 pb-2 mb-4">3. Operating Expenses</h3>
               <div className="space-y-3 pl-4">
@@ -189,7 +186,6 @@ export default async function ProfitAndLossPage(props: { searchParams: Promise<{
               </div>
             </div>
 
-            {/* NET INCOME SUMMARY */}
             <div className="mt-8 pt-6 border-t-2 border-neutral-900">
               <div className="flex justify-between items-center">
                 <div>
