@@ -17,6 +17,9 @@ import { DownloadPDFButton } from "@/features/invoices/components/DownloadPDFBut
 import SecureRouteInterceptor from "./SecureRouteInterceptor";
 import EditPaymentDialog from "./EditPaymentDialog";
 
+// THE FIX: Import the new Void Payment Dialog!
+import VoidPaymentDialog from "./VoidPaymentDialog"; 
+
 export default function ViewInvoicePage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
   const router = useRouter();
@@ -32,7 +35,7 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
   const [userRole, setUserRole] = useState("");
   const [allowStaffPayment, setAllowStaffPayment] = useState(true);
   const [allowStaffRefund, setAllowStaffRefund] = useState(true);
-  const [allowStaffVoid, setAllowStaffVoid] = useState(true); // THE NEW STATE
+  const [allowStaffVoid, setAllowStaffVoid] = useState(true); 
   
   const [displayAmount, setDisplayAmount] = useState("");
   const [rawAmount, setRawAmount] = useState(0);
@@ -46,7 +49,6 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // THE FIX: Fetching the new allow_staff_void_request column
       const { data: profile } = await supabase
         .from("profiles")
         .select("business_id, role, businesses(business_name, allow_staff_payment_logging, allow_staff_refund_request, allow_staff_void_request)")
@@ -61,8 +63,6 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
       setBusinessName(currentBusiness?.business_name);
       setAllowStaffPayment(currentBusiness?.allow_staff_payment_logging ?? true);
       setAllowStaffRefund(currentBusiness?.allow_staff_refund_request ?? true);
-      
-      // THE FIX: Setting the Void Toggle
       setAllowStaffVoid(currentBusiness?.allow_staff_void_request ?? true); 
 
       const { data: inv } = await supabase.from("invoices").select(`*, invoice_items(*)`).eq("id", params.id).eq("business_id", bId).single();
@@ -277,14 +277,23 @@ export default function ViewInvoicePage(props: { params: Promise<{ id: string }>
                               <span className="text-[9px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold uppercase tracking-wider">Void Pending</span>
                             ) : (
                               (isOwner || allowStaffPayment) && (
-                                /* THE FIX: Injecting the new allowStaffVoid prop down to the child component */
-                                <EditPaymentDialog 
-                                  payment={payment} 
-                                  invoiceId={invoice.id} 
-                                  clientName={invoice.client_name} 
-                                  userRole={userRole} 
-                                  allowStaffVoid={allowStaffVoid} 
-                                />
+                                <div className="flex items-center gap-1.5">
+                                  <EditPaymentDialog 
+                                    payment={payment} 
+                                    invoiceId={invoice.id} 
+                                    clientName={invoice.client_name} 
+                                    userRole={userRole} 
+                                    allowStaffVoid={allowStaffVoid} 
+                                  />
+                                  {/* THE FIX: The new Owner-Only Void Button */}
+                                  {isOwner && (
+                                    <VoidPaymentDialog 
+                                      paymentId={payment.id} 
+                                      amount={payment.amount} 
+                                      date={payment.date} 
+                                    />
+                                  )}
+                                </div>
                               )
                             )}
                           </div>
