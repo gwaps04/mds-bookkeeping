@@ -9,19 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-import { Lock } from "lucide-react"; 
+import { Lock, Banknote } from "lucide-react"; 
 
 import { IncomeEditInterceptor, IncomeDeleteDialog } from "./IncomeActionDialogs";
 import { getTenantAccessLevel } from "@/lib/subscription";
 
-// THE FIX 1: Import our Universal Pagination Component
 import TablePagination from "@/components/TablePagination"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function IncomePage(props: { 
-  // THE FIX 2: Added "page" to the Search Params
   searchParams: Promise<{ search?: string, from?: string, to?: string, month?: string, year?: string, page?: string }> 
 }) {
   const params = await props.searchParams;
@@ -84,8 +82,7 @@ export default async function IncomePage(props: {
   }
 
   // ============================================================================
-  // THE FIX 3: DATABASE-LEVEL FILTERING WITH PAGINATION LIMITS
-  // Notice { count: 'exact' } is applied!
+  // DATABASE-LEVEL FILTERING WITH PAGINATION LIMITS
   // ============================================================================
   let query = supabase
     .from("income")
@@ -104,7 +101,6 @@ export default async function IncomePage(props: {
   if (startDate) query = query.gte("date", startDate);
   if (endDate) query = query.lte("date", endDate);
 
-  // Apply Pagination Database Limits
   query = query.range(from, to);
 
   const { data: incomeRecords, count } = await query;
@@ -115,49 +111,57 @@ export default async function IncomePage(props: {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div>
-        <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">Income & Sales</h2>
-        <p className="text-neutral-500 mt-1">Record instant cash receipts, retail sales, and capital injections.</p>
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 w-full min-w-0 overflow-x-hidden">
+      
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="w-full min-w-0">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">Income & Sales</h2>
+          <p className="text-sm sm:text-base text-neutral-500 mt-1">Record instant cash receipts, retail sales, and capital injections.</p>
+        </div>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-3 items-start">
+      {/* THE FIX 1: Add min-w-0 to the master grid and its columns to prevent Grid Blowout! */}
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
-        <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200 sticky top-8">
-            <CardHeader>
-              <CardTitle className="text-lg">Record Cash Receipt</CardTitle>
+        {/* LEFT COLUMN: CREATION FORM */}
+        <div className="lg:col-span-1 w-full min-w-0">
+          <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8 bg-white w-full min-w-0">
+            <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 pb-4">
+              <CardTitle className="text-lg font-bold text-neutral-900 flex items-center gap-2">
+                <Banknote size={18} className="text-green-600" /> Record Cash Receipt
+              </CardTitle>
               <CardDescription>Log money entering the business.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-5">
               <form action={async (formData) => {
                 "use server";
                 await createIncome(formData);
-              }} className="space-y-4">
+              }} className="space-y-4 w-full">
                 
-                <div className="space-y-2">
-                  <Label htmlFor="customer_name">Customer / Entity</Label>
-                  <Input id="customer_name" name="customer_name" placeholder="e.g. Juan Dela Cruz, Business Owner" required disabled={isLocked} />
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="customer_name" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Customer / Entity</Label>
+                  <Input id="customer_name" name="customer_name" placeholder="e.g. Walk-in, Business Owner" required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">Amount</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required disabled={isLocked} />
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 w-full">
+                  <div className="space-y-1.5 w-full">
+                    <Label htmlFor="amount" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Amount</Label>
+                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="date">Date</Label>
-                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required disabled={isLocked} />
+                  <div className="space-y-1.5 w-full">
+                    <Label htmlFor="date" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Date</Label>
+                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="category_id">Category (Revenue / Equity)</Label>
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="category_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Category</Label>
                   <Select name="category_id" required disabled={isLocked}>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full focus:ring-green-600">
                       <SelectValue placeholder="Select category..." />
                     </SelectTrigger>
-                    <SelectContent className="max-h-[300px]">
+                    <SelectContent className="max-h-[250px] w-full">
                       {revenueCategories.map((cat) => (
                         <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                       ))}
@@ -165,13 +169,13 @@ export default async function IncomePage(props: {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="account_id">Deposit To (Bank / Cash)</Label>
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="account_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Deposit To (Bank)</Label>
                   <Select name="account_id" required disabled={isLocked}>
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full focus:ring-green-600">
                       <SelectValue placeholder="Select account..." />
                     </SelectTrigger>
-                    <SelectContent className="max-h-[300px]">
+                    <SelectContent className="max-h-[250px] w-full">
                       {bankAccounts.map((acc) => (
                         <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
                       ))}
@@ -179,65 +183,67 @@ export default async function IncomePage(props: {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="reference_number">Reference Number (Optional)</Label>
-                  <Input id="reference_number" name="reference_number" placeholder="e.g. GCash Ref, Check No." disabled={isLocked} />
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="reference_number" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Ref No. (Optional)</Label>
+                  <Input id="reference_number" name="reference_number" placeholder="e.g. GCash Ref, Check No." disabled={isLocked} className="w-full focus-visible:ring-green-600" />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="description">Notes (Optional)</Label>
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="description" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Notes (Optional)</Label>
                   <Textarea 
                     id="description" 
                     name="description" 
                     placeholder="Provide details about this transaction..." 
-                    className="resize-none h-20"
+                    className="w-full resize-none h-16 focus-visible:ring-green-600"
                     disabled={isLocked}
                   />
                 </div>
 
-                {isLocked ? (
-                  <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2">
-                    <Lock size={16} /> Creation Locked
-                  </Button>
-                ) : (
-                  <SubmitButton 
-                    title="Record Income" 
-                    loadingTitle="Saving Record..." 
-                    className="w-full bg-green-600 hover:bg-green-700 text-white transition-all" 
-                  />
-                )}
+                <div className="pt-2 w-full">
+                  {isLocked ? (
+                    <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 h-11 md:h-10">
+                      <Lock size={16} /> Creation Locked
+                    </Button>
+                  ) : (
+                    <SubmitButton 
+                      title="Record Income" 
+                      loadingTitle="Saving Record..." 
+                      className="w-full bg-green-600 hover:bg-green-700 text-white font-bold transition-all h-11 md:h-10 shadow-sm" 
+                    />
+                  )}
+                </div>
               </form>
             </CardContent>
           </Card>
         </div>
 
-        <div className="md:col-span-2 space-y-4">
+        {/* RIGHT COLUMN: TABLE & FILTERS */}
+        <div className="lg:col-span-2 space-y-4 w-full min-w-0">
           
-          <Card className="shadow-sm border-neutral-200 bg-white">
-            <CardContent className="p-4">
-              <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
+          <Card className="shadow-sm border-neutral-200 bg-white w-full min-w-0">
+            <CardContent className="p-4 md:p-5">
+              <form method="GET" className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end w-full">
                 
-                {/* THE FIX 4: Reset Page to 1 when a new filter is executed! */}
                 <input type="hidden" name="page" value="1" />
 
-                <div className="flex-1 w-full space-y-1">
-                  <Label className="text-xs text-neutral-500">Search Notes</Label>
-                  <Input name="search" placeholder="Search description..." defaultValue={params?.search} />
+                <div className="flex-1 w-full min-w-[200px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Search Notes</Label>
+                  <Input name="search" placeholder="Search description..." defaultValue={params?.search} className="bg-neutral-50 border-neutral-200 focus-visible:ring-neutral-900 w-full" />
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">From Date</Label>
-                  <Input type="date" name="from" defaultValue={params?.from} />
+                <div className="w-full sm:w-auto min-w-[130px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">From Date</Label>
+                  <Input type="date" name="from" defaultValue={params?.from} className="bg-neutral-50 border-neutral-200 w-full" />
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">To Date</Label>
-                  <Input type="date" name="to" defaultValue={params?.to} />
+                <div className="w-full sm:w-auto min-w-[130px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">To Date</Label>
+                  <Input type="date" name="to" defaultValue={params?.to} className="bg-neutral-50 border-neutral-200 w-full" />
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
-                  
+                
+                <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                  <Button type="submit" className="bg-neutral-900 text-white flex-1 sm:flex-none shadow-sm transition-all hover:bg-neutral-800">Filter</Button>
                   {(params?.search || params?.from || params?.to || params?.month || params?.year) && (
-                    <Link href="/income">
-                      <Button variant="outline" className="text-neutral-500">Clear</Button>
+                    <Link href="/income" className="flex-1 sm:flex-none">
+                      <Button variant="outline" className="w-full text-neutral-600 border-neutral-200 hover:bg-neutral-50 transition-colors">Clear</Button>
                     </Link>
                   )}
                 </div>
@@ -245,24 +251,24 @@ export default async function IncomePage(props: {
             </CardContent>
           </Card>
 
-          {/* THE FIX 5: Layout adjust for Pagination placement */}
-          <Card className="shadow-sm border-neutral-200 bg-white flex flex-col">
-            <CardContent className="p-0 flex-1">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap min-w-[600px]">
-                  <thead className="bg-neutral-50 border-b border-neutral-200">
+          {/* INCOME LEDGER - FLUID OPTIMIZED */}
+          <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
+            <CardContent className="p-0 flex-1 w-full overflow-hidden">
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-left text-sm table-auto">
+                  <thead className="bg-neutral-50/80 border-b border-neutral-200">
                     <tr>
-                      <th className="px-4 py-4 font-medium text-neutral-900">Date</th>
-                      <th className="px-4 py-4 font-medium text-neutral-900">Entity & Notes</th>
-                      <th className="px-4 py-4 font-medium text-neutral-900">Category</th>
-                      <th className="px-4 py-4 font-medium text-neutral-900 text-right">Amount</th>
-                      <th className="px-4 py-4 font-medium text-neutral-900 text-center">Actions</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] whitespace-nowrap w-auto">Date</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] w-full">Entity & Notes</th>
+                      <th className="hidden sm:table-cell px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] whitespace-nowrap">Category</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] text-right whitespace-nowrap w-auto">Amount</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] text-center whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-200">
+                  <tbody className="divide-y divide-neutral-100">
                     {(!incomeRecords || incomeRecords.length === 0) ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-16 text-center text-neutral-500">
+                        <td colSpan={5} className="px-6 py-16 text-center text-neutral-500">
                           No income records found for this period.
                         </td>
                       </tr>
@@ -271,39 +277,60 @@ export default async function IncomePage(props: {
                         const clientName = inc.customers?.name || 'Walk-in';
                         const isEquity = inc.accounts?.type === 'equity'; 
                         
+                        const categoryBadge = (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold uppercase tracking-wider border shadow-sm ${
+                            isEquity ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-green-50 text-green-700 border-green-200'
+                          }`}>
+                            {inc.accounts?.name || 'Uncategorized'}
+                          </span>
+                        );
+
                         return (
-                          <tr key={inc.id} className="hover:bg-neutral-50 group transition-colors">
-                            <td className="px-4 py-4 text-neutral-500">
-                              {new Date(inc.date).toLocaleDateString()}
+                          <tr key={inc.id} className="hover:bg-neutral-50/60 transition-colors group">
+                            
+                            <td className="px-4 sm:px-6 py-4 text-neutral-500 font-medium whitespace-nowrap text-xs sm:text-sm align-top sm:align-middle">
+                              {new Date(inc.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                             </td>
-                            <td className="px-4 py-4">
-                              <p className="font-medium text-neutral-900">{clientName}</p>
-                              <p className="text-xs text-neutral-500 mt-0.5 truncate max-w-[200px]">{inc.description}</p>
+                            
+                            <td className="px-4 sm:px-6 py-4 whitespace-normal break-words w-full min-w-[150px] align-middle">
+                              <p className="font-bold text-neutral-900 text-sm sm:text-base leading-tight">{clientName}</p>
+                              <p className="text-[11px] sm:text-xs text-neutral-500 mt-1 line-clamp-2">{inc.description}</p>
+                              
                               {inc.reference_number && (
-                                <span className="block text-xs text-neutral-400 font-mono mt-0.5">Ref: {inc.reference_number}</span>
+                                <p className="text-[10px] text-neutral-400 font-mono mt-1 break-all">Ref: {inc.reference_number}</p>
                               )}
+
+                              <div className="mt-2 sm:hidden">
+                                {categoryBadge}
+                              </div>
                             </td>
-                            <td className="px-4 py-4 text-neutral-600">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                isEquity ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-green-50 text-green-700 border border-green-200'
-                              }`}>
-                                {inc.accounts?.name || 'Uncategorized'}
-                              </span>
+                            
+                            <td className="hidden sm:table-cell px-4 sm:px-6 py-4 align-middle whitespace-nowrap">
+                              {categoryBadge}
                             </td>
-                            <td className={`px-4 py-4 text-right font-medium ${isEquity ? 'text-purple-600' : 'text-green-600'}`}>
-                              +{formatCurrency(Number(inc.amount))}
+                            
+                            <td className="px-4 sm:px-6 py-4 text-right align-top sm:align-middle whitespace-nowrap">
+                              <div className={`font-black text-sm sm:text-base ${isEquity ? 'text-purple-600' : 'text-green-600'}`}>
+                                +{formatCurrency(Number(inc.amount))}
+                              </div>
                             </td>
-                            <td className="px-4 py-4 text-center">
-                              <div className="flex items-center justify-center gap-2">
+                            
+                            <td className="px-4 sm:px-6 py-4 text-center align-middle whitespace-nowrap">
+                              <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
                                 {isLocked ? (
-                                  <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                  <Button disabled variant="outline" size="sm" className="w-full sm:w-auto h-8 sm:h-9 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed font-bold">
                                     <Lock size={10} className="mr-1.5" /> Edit
                                   </Button>
                                 ) : (
-                                  <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
+                                  <div className="w-full sm:w-auto">
+                                    <IncomeEditInterceptor targetUrl={`/income/${inc.id}/edit`} />
+                                  </div>
                                 )}
+                                
                                 {isOwner && !isLocked && (
-                                  <IncomeDeleteDialog incomeId={inc.id} amount={inc.amount} clientName={clientName} />
+                                  <div className="w-full sm:w-auto">
+                                    <IncomeDeleteDialog incomeId={inc.id} amount={inc.amount} clientName={clientName} />
+                                  </div>
                                 )}
                               </div>
                             </td>
@@ -316,7 +343,6 @@ export default async function IncomePage(props: {
               </div>
             </CardContent>
 
-            {/* THE FIX 6: Render the Universal Pagination UI */}
             <TablePagination 
               totalItems={totalItems} 
               itemsPerPage={ITEMS_PER_PAGE} 
