@@ -6,14 +6,25 @@ import { createItem } from "@/features/inventory/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import SubmitButton from "@/components/SubmitButton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 
 export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [itemType, setItemType] = useState("SELLABLE_SIMPLE");
+  
+  // THE FIX: Control the Unit of Measure state to handle defaults
+  const [unitOfMeasure, setUnitOfMeasure] = useState("");
+  
   const [recipe, setRecipe] = useState<any[]>([]);
   const [isPending, setIsPending] = useState(false);
+
+  // Dynamic default setter based on item type
+  const handleTypeChange = (val: string) => {
+    setItemType(val);
+    if (val === 'RAW_MATERIAL') setUnitOfMeasure("grams");
+    else if (val === 'SELLABLE_COMPOSITE') setUnitOfMeasure("serving");
+    else setUnitOfMeasure("pcs");
+  };
 
   const addIngredient = () => setRecipe([...recipe, { raw_material_item_id: "", quantity_required: 1, unit_cost: 0 }]);
   const removeIngredient = (index: number) => setRecipe(recipe.filter((_, i) => i !== index));
@@ -31,15 +42,14 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
 
   const calculatedCOGS = recipe.reduce((sum, item) => sum + (Number(item.quantity_required) * Number(item.unit_cost)), 0);
 
-  // THE FIX: Custom submit handler to reset the form after success
   const handleSubmit = async (formData: FormData) => {
     setIsPending(true);
     try {
       await createItem(formData);
-      // Reset the UI perfectly
       formRef.current?.reset();
       setRecipe([]);
       setItemType("SELLABLE_SIMPLE");
+      setUnitOfMeasure(""); // Reset the select dropdown
     } catch (error: any) {
       alert(error.message);
     } finally {
@@ -51,7 +61,7 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
     <form ref={formRef} action={handleSubmit} className="space-y-4">
       <div className="space-y-1.5">
         <Label>Item Classification</Label>
-        <Select name="type" value={itemType} onValueChange={setItemType} required>
+        <Select name="type" value={itemType} onValueChange={handleTypeChange} required>
           <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
           <SelectContent>
             <SelectItem value="SELLABLE_SIMPLE">Sellable Product (Auto-deducted on Invoice)</SelectItem>
@@ -74,7 +84,37 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
         </div>
         <div className="space-y-1.5">
           <Label>Unit of Measure</Label>
-          <Input name="unit_of_measure" defaultValue={itemType === 'RAW_MATERIAL' ? "grams" : "pcs"} required />
+          {/* THE FIX: Standardized Dropdown for UOM */}
+          <Select name="unit_of_measure" value={unitOfMeasure} onValueChange={setUnitOfMeasure} required>
+            <SelectTrigger><SelectValue placeholder="Select unit..." /></SelectTrigger>
+            <SelectContent className="max-h-[250px]">
+              <SelectGroup>
+                <SelectLabel>Physical Count</SelectLabel>
+                <SelectItem value="pcs">Pieces (pcs)</SelectItem>
+                <SelectItem value="box">Box (box)</SelectItem>
+                <SelectItem value="pack">Pack (pack)</SelectItem>
+                <SelectItem value="set">Set (set)</SelectItem>
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Weight & Volume</SelectLabel>
+                <SelectItem value="grams">Grams (g)</SelectItem>
+                <SelectItem value="kg">Kilograms (kg)</SelectItem>
+                <SelectItem value="ml">Milliliters (ml)</SelectItem>
+                <SelectItem value="liter">Liters (L)</SelectItem>
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Length</SelectLabel>
+                <SelectItem value="cm">Centimeters (cm)</SelectItem>
+                <SelectItem value="meter">Meters (m)</SelectItem>
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>Services</SelectLabel>
+                <SelectItem value="hour">Hours (hr)</SelectItem>
+                <SelectItem value="session">Session</SelectItem>
+                <SelectItem value="serving">Serving</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

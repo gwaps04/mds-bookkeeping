@@ -10,12 +10,14 @@ import Link from "next/link";
 import CreateAccountForm from "./CreateAccountForm"; 
 import ArchiveAccountDialog from "./ArchiveAccountDialog"; 
 import SubmitButton from "@/components/SubmitButton"; 
-import { ArchiveRestore, Lock, Info } from "lucide-react"; // THE FIX: Imported Info icon
+import { ArchiveRestore, Lock, Info } from "lucide-react"; 
 
-// THE FIX: Import the SaaS Engine
+// THE FIX 1: Import the Universal Pagination Component
+import TablePagination from "@/components/TablePagination"; 
 import { getTenantAccessLevel } from "@/lib/subscription";
 
-export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string, view?: string }> }) {
+// THE FIX 2: Added "page" to the Search Params
+export default async function AccountsPage(props: { searchParams: Promise<{ search?: string, type?: string, view?: string, page?: string }> }) {
   const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -36,6 +38,12 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
 
   const isArchiveView = params?.view === 'archived';
 
+  // PAGINATION SETUP
+  const ITEMS_PER_PAGE = 50;
+  const currentPage = parseInt(params?.page || '1');
+  const from = (currentPage - 1) * ITEMS_PER_PAGE;
+  const to = from + ITEMS_PER_PAGE - 1;
+
   // ============================================================================
   // 1. THE SAAS SUBSCRIPTION ENGINE
   // ============================================================================
@@ -46,15 +54,16 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
     .single();
 
   const accessState = getTenantAccessLevel(business);
-  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+  const isLocked = accessState.isLocked; 
   // ============================================================================
 
   // ============================================================================
-  // THE GATEKEEPER: Dynamic Archive / Active Querying
+  // THE GATEKEEPER: Dynamic Archive / Active Querying with Database Limits
+  // Notice { count: 'exact' } is added to fetch the total rows for pagination.
   // ============================================================================
   let query = supabase
     .from("accounts")
-    .select("*")
+    .select("*", { count: 'exact' })
     .eq("business_id", businessId)
     .order("type", { ascending: true })
     .order("name", { ascending: true });
@@ -68,7 +77,11 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
   if (params?.search) query = query.ilike("name", `%${params.search}%`);
   if (params?.type && params.type !== "all") query = query.eq("type", params.type);
 
-  const { data: accounts } = await query;
+  // Apply Pagination Database Limits
+  query = query.range(from, to);
+
+  const { data: accounts, count } = await query;
+  const totalItems = count || 0;
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -80,9 +93,6 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
         </div>
       </div>
 
-      {/* ============================================================================ */}
-      {/* THE FIX: INJECTED QUICK GUIDE TIPS FOR CHART OF ACCOUNTS */}
-      {/* ============================================================================ */}
       <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
@@ -103,7 +113,7 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
         </div>
       </div>
 
-      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3">
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start">
         
         <div className="lg:col-span-1">
           {isLocked ? (
@@ -151,6 +161,10 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
           <Card className="shadow-sm border-neutral-200 bg-white">
             <CardContent className="p-4">
               <form method="GET" className="flex flex-col md:flex-row gap-3 md:items-end">
+                
+                {/* THE FIX 3: Reset Page to 1 when a new search/filter is executed! */}
+                <input type="hidden" name="page" value="1" />
+
                 <div className="flex-1 w-full space-y-1">
                   <Label className="text-xs text-neutral-500">Search Accounts</Label>
                   <Input name="search" placeholder="Search by name..." defaultValue={params?.search} />
@@ -201,8 +215,8 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
             </div>
           )}
 
-          <Card className="shadow-sm border-neutral-200">
-            <CardContent className="p-0">
+          <Card className="shadow-sm border-neutral-200 flex flex-col">
+            <CardContent className="p-0 flex-1">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm whitespace-nowrap min-w-[500px]">
                   <thead className="bg-neutral-50 border-b border-t border-neutral-200">
@@ -215,7 +229,7 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                   <tbody className="divide-y divide-neutral-200">
                     {(!accounts || accounts.length === 0) ? (
                       <tr>
-                        <td colSpan={3} className="px-4 py-8 text-center text-neutral-500">
+                        <td colSpan={3} className="px-4 py-16 text-center text-neutral-500">
                           {isArchiveView ? "No archived accounts found." : "No active accounts found."}
                         </td>
                       </tr>
@@ -272,6 +286,13 @@ export default async function AccountsPage(props: { searchParams: Promise<{ sear
                 </table>
               </div>
             </CardContent>
+            
+            {/* THE FIX 4: Render the Universal Pagination UI */}
+            <TablePagination 
+              totalItems={totalItems} 
+              itemsPerPage={ITEMS_PER_PAGE} 
+              currentPage={currentPage} 
+            />
           </Card>
 
         </div>

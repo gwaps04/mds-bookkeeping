@@ -8,17 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import ConfirmDeleteForm from "@/components/ConfirmDeleteForm";
-import { Lock, Plus } from "lucide-react"; // THE FIX: Imported icons for visual feedback
+import { Lock, Plus } from "lucide-react"; 
 
-
-// THE FIX: Import the SaaS Engine
 import { getTenantAccessLevel } from "@/lib/subscription";
 import { redirect } from "next/navigation";
 
+// THE FIX 1: Import our Universal Pagination Component
+import TablePagination from "@/components/TablePagination"; 
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-
-export default async function InvoicesPage(props: { searchParams: Promise<{ search?: string, status?: string }> }) {
+// THE FIX 2: Added "page" to the expected search parameters
+export default async function InvoicesPage(props: { searchParams: Promise<{ search?: string, status?: string, page?: string }> }) {
   const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -26,8 +28,12 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user?.id).single();
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
+  // PAGINATION SETUP
+  const ITEMS_PER_PAGE = 50;
+  const currentPage = parseInt(params?.page || '1');
+  const from = (currentPage - 1) * ITEMS_PER_PAGE;
+  const to = from + ITEMS_PER_PAGE - 1;
 
-  
   // ============================================================================
   // 1. THE SAAS SUBSCRIPTION ENGINE
   // ============================================================================
@@ -43,10 +49,13 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
   // 2. GET TODAY'S DATE FOR THE DETECTOR
   const today = new Date().toISOString().split('T')[0];
 
-  // 3. BUILD SEARCH & FILTER QUERY
+  // ============================================================================
+  // 3. BUILD SEARCH & FILTER QUERY WITH PAGINATION & ORPHAN GUARD
+  // Notice we request { count: 'exact' } and include income(id) for safety!
+  // ============================================================================
   let query = supabase
     .from("invoices")
-    .select("*")
+    .select("*, income(id)", { count: 'exact' }) 
     .eq("business_id", profile?.business_id)
     .order("created_at", { ascending: false });
 
@@ -61,14 +70,21 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
     }
   }
 
-  const { data: fetchedInvoices } = await query;
+  // Apply Pagination Database Limits
+  query = query.range(from, to);
 
-  // 5. THE OVERDUE DETECTOR (ON-THE-FLY INTERCEPTOR)
+  const { data: fetchedInvoices, count } = await query;
+  const totalItems = count || 0;
+
+  // 5. THE OVERDUE & ORPHAN DETECTOR (ON-THE-FLY INTERCEPTOR)
   const invoices = (fetchedInvoices || []).map(inv => {
     const isOverdue = (inv.status !== 'paid' && inv.status !== 'cancelled') && (inv.due_date < today);
+    const hasPayments = inv.income && inv.income.length > 0; 
+    
     return {
       ...inv,
-      displayStatus: isOverdue ? 'overdue' : inv.status
+      displayStatus: isOverdue ? 'overdue' : inv.status,
+      hasPayments
     };
   });
 
@@ -82,7 +98,6 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
           <p className="text-neutral-500 mt-1">Manage and track your accounts receivable.</p>
         </div>
         
-        {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
         {isLocked ? (
           <Button disabled className="bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center gap-2">
             <Lock size={14} /> Creation Locked
@@ -100,6 +115,10 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
       <Card className="shadow-sm border-neutral-200 bg-white">
         <CardContent className="p-4">
           <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
+            
+            {/* THE FIX 3: Reset Page to 1 when a new search/filter is executed! */}
+            <input type="hidden" name="page" value="1" />
+
             <div className="flex-1 w-full space-y-1">
               <Label className="text-xs text-neutral-500">Search Client</Label>
               <Input name="search" placeholder="Search client name..." defaultValue={params?.search} />
@@ -130,8 +149,8 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
       </Card>
 
       {/* INVOICE LEDGER */}
-      <Card className="shadow-sm border-neutral-200">
-        <CardContent className="p-0">
+      <Card className="shadow-sm border-neutral-200 flex flex-col">
+        <CardContent className="p-0 flex-1">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap min-w-[800px]">
               <thead className="bg-neutral-50 border-b border-t border-neutral-200">
@@ -178,16 +197,13 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
                         </span>
                       </td>
                       
-                      {/* ACTION BUTTONS (Cleanly wrapped inside one <td>) */}
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           
-                          {/* VIEW PDF: Always available (Read-Only) */}
                           <Link href={`/invoices/${inv.id}`}>
                             <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-neutral-700 hover:bg-neutral-100 transition-colors">View PDF</Button>
                           </Link>
 
-                          {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
                           {isLocked ? (
                             <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
                               <Lock size={10} className="mr-1.5" /> Edit
@@ -198,13 +214,19 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
                             </Link>
                           )}
                           
-                          {/* DELETE: Hidden entirely if locked to prevent visual clutter */}
+                          {/* THE RE-INJECTED ORPHAN DATA GUARD */}
                           {isOwner && !isLocked && (
-                            <ConfirmDeleteForm 
-                              action={deleteOfficialInvoice} 
-                              id={inv.id} 
-                              itemName={`Invoice #${inv.id.split('-')[0].toUpperCase()}`} 
-                            />
+                            inv.hasPayments ? (
+                              <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed" title="Payments recorded. Void payments before deleting invoice.">
+                                <Lock size={10} className="mr-1.5" /> Locked
+                              </Button>
+                            ) : (
+                              <ConfirmDeleteForm 
+                                action={deleteOfficialInvoice} 
+                                id={inv.id} 
+                                itemName={`Invoice #${inv.id.split('-')[0].toUpperCase()}`} 
+                              />
+                            )
                           )}
 
                         </div>
@@ -216,6 +238,13 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
             </table>
           </div>
         </CardContent>
+
+        {/* THE FIX 4: Render the Universal Pagination UI */}
+        <TablePagination 
+          totalItems={totalItems} 
+          itemsPerPage={ITEMS_PER_PAGE} 
+          currentPage={currentPage} 
+        />
       </Card>
     </div>
   );

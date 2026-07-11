@@ -191,8 +191,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <div>
             <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-1.5">Quick Guide: Reading Your Dashboard</h3>
             <ul className="text-xs sm:text-sm text-blue-800 space-y-1.5 leading-relaxed list-disc list-inside ml-2">
-              <li><strong>The Time Filter:</strong> Use the dropdowns in the top right to analyze specific months or your entire fiscal year. The metric cards will instantly calculate data for your chosen period[cite: 17].</li>
-              <li><strong>Net Cash vs. Revenue:</strong> <em>Net Cash Balance</em> tracks your absolute Cash flow (all money in minus all money out). <em>Total Revenue</em> strictly tracks sales (it automatically hides personal Equity injections to protect your tax calculations)[cite: 17].</li>
+              <li><strong>The Time Filter:</strong> Use the dropdowns in the top right to analyze specific months or your entire fiscal year. The metric cards will instantly calculate data for your chosen period.</li>
+              <li><strong>Net Cash vs. Revenue:</strong> <em>Net Cash Balance</em> tracks your absolute Cash flow (all money in minus all money out). <em>Total Revenue</em> strictly tracks sales (it automatically hides personal Equity injections to protect your tax calculations).</li>
             </ul>
           </div>
         </div>

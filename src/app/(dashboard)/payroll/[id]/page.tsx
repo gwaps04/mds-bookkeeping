@@ -1,228 +1,195 @@
 // src/app/(dashboard)/payroll/[id]/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import SubmitButton from "@/components/SubmitButton";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, Calculator, AlertCircle, ShieldOff, CheckCircle2 } from "lucide-react";
-import { saveDraftPayslips, finalizePayrollRun } from "@/features/payroll/actions";
-import DisburseDialog from "./DisburseDialog";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { ArrowLeft, ExternalLink, Calculator, CheckCircle2, Clock, AlertCircle, Info, Users, Banknote, Receipt, FileText } from "lucide-react";
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export default async function PayrollRunDetailsPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const runId = params.id;
-
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from("profiles").select("business_id, businesses(currency)").eq("id", user?.id).single();
-  const businessId = profile?.business_id;
-  const bizData = profile?.businesses as any;
-  const currency = Array.isArray(bizData) ? bizData[0]?.currency : bizData?.currency || "PHP";
+  if (!user) redirect("/login");
 
-  const { data: run } = await supabase.from("payroll_runs").select("*").eq("id", runId).eq("business_id", businessId).single();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("business_id, businesses(currency)")
+    .eq("id", user.id)
+    .single();
+
+  const businessId = profile?.business_id;
+  const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
+  const currency = bizData?.currency || "PHP";
+
+  // FETCH THE RUN AND ITS ASSOCIATED PAYSLIPS
+  const { data: run } = await supabase
+    .from("payroll_runs")
+    .select(`
+      *,
+      payslips (
+        id,
+        gross_pay,
+        net_pay,
+        employees (first_name, last_name, position, pay_type)
+      )
+    `)
+    .eq("id", params.id)
+    .eq("business_id", businessId)
+    .single();
+
   if (!run) redirect("/payroll");
 
-  const { data: payslips } = await supabase
-    .from("payslips")
-    .select(`id, hours_worked, overtime_hours, commission_earned, gross_pay, net_pay, breakdown, employees!inner ( first_name, last_name, position, pay_type, base_rate, sss_enabled, philhealth_enabled, pagibig_enabled, tax_enabled )`)
-    .eq("payroll_run_id", runId)
-    .order("employees(first_name)", { ascending: true });
-
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
-  
-  const isDraft = run.status === 'DRAFT';
-  const isFinalized = run.status === 'FINALIZED';
-  const isPaid = run.status === 'PAID';
-  const is13thMonth = run.run_type === '13TH_MONTH';
-  
-  const totalGross = (payslips || []).reduce((sum, slip) => sum + Number(slip.gross_pay), 0);
-  const totalNet = (payslips || []).reduce((sum, slip) => sum + Number(slip.net_pay), 0);
 
-  // FETCH ASSET ACCOUNTS FOR DISBURSEMENT
-  let bankAccounts: any[] = [];
-  if (isFinalized) {
-    const { data } = await supabase.from("accounts").select("id, name").eq("business_id", businessId).in("type", ["asset", "liability"]).order("name");
-    bankAccounts = data || [];
-  }
+  const payslips = run.payslips || [];
+  const totalGross = payslips.reduce((sum: number, slip: any) => sum + Number(slip.gross_pay), 0);
+  const totalNet = payslips.reduce((sum: number, slip: any) => sum + Number(slip.net_pay), 0);
+  const totalDeductions = totalGross - totalNet;
+
+  const StatusBadge = () => {
+    if (run.status === 'DRAFT') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200"><Clock size={14} /> Pending Review</span>;
+    if (run.status === 'FINALIZED') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200"><AlertCircle size={14} /> Awaiting Payout</span>;
+    if (run.status === 'PAID') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200"><CheckCircle2 size={14} /> Disbursed</span>;
+    return null;
+  };
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12">
       
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/payroll"><Button variant="outline" size="icon" className="bg-white rounded-full"><ArrowLeft size={16} /></Button></Link>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-neutral-900">Payroll Cycle Details</h2>
-              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isDraft ? 'bg-amber-100 text-amber-800' : isFinalized ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                {isDraft ? 'Draft' : isFinalized ? 'Finalized' : 'Disbursed'}
-              </span>
-            </div>
-            <p className="text-sm text-neutral-500 mt-1">
-              {is13thMonth 
-                ? `13th Month Pay (${new Date(run.period_start).getFullYear()})` 
-                : `Period: ${new Date(run.period_start).toLocaleDateString()} to ${new Date(run.period_end).toLocaleDateString()}`
-              }
-            </p>
-          </div>
-        </div>
-
-        {/* WORKFLOW ACTIONS */}
-        <div className="flex items-center gap-2">
-          
-          {/* THE NEW PRINT BUTTON */}
-          <Link href={`/payroll/${run.id}/print`} target="_blank">
-            <Button variant="outline" className="bg-white border-neutral-200">
-              Print Payslips
-            </Button>
+      {/* HEADER & NAV */}
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <Link href="/payroll" className="inline-flex items-center text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors mb-3">
+            <ArrowLeft size={16} className="mr-1.5" /> Back to Payroll Hub
           </Link>
-
-          {isDraft && (
-            <form action={async (formData) => { "use server"; await finalizePayrollRun(formData); }}>
-              <input type="hidden" name="run_id" value={run.id} />
-              <input type="hidden" name="business_id" value={businessId} />
-              <SubmitButton title="Finalize Payroll" className="bg-blue-600 hover:bg-blue-700 text-white" />
-            </form>
-          )}
-          {isFinalized && (
-            <DisburseDialog runId={run.id} accounts={bankAccounts} totalGross={formatCurrency(totalGross)} />
-          )}
-          {isPaid && (
-            <Button disabled variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 opacity-100">
-              <CheckCircle2 size={16} className="mr-2" /> Ledger Closed
-            </Button>
-          )}
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-neutral-900">Cycle Details</h2>
+            <StatusBadge />
+          </div>
+          <p className="text-sm md:text-base text-neutral-500 mt-1">
+            {new Date(run.period_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} — {new Date(run.period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </p>
         </div>
       </div>
 
-      {isDraft && !is13thMonth && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3 shadow-sm">
-          <AlertCircle className="text-amber-600 mt-0.5 shrink-0" />
+      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
+            <Info size={16} />
+          </div>
           <div>
-            <h4 className="text-sm font-bold text-amber-900">Draft Mode Active</h4>
-            <p className="text-xs text-amber-700 mt-1">
-              Gross pay and statutory deductions have been auto-calculated. You may adjust hours worked or commissions before finalizing.
+            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-1.5">Payslip Rendering Update</h3>
+            <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
+              To prevent browser crashing and formatting errors during bulk PDF exports, payslips are now isolated. Click <strong className="font-bold text-blue-950">View Payslip</strong> next to any employee to open and download their perfectly formatted, A4-ready digital document.
             </p>
           </div>
         </div>
-      )}
+      </div>
 
-      {isDraft && is13thMonth && (
-        <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl flex items-start gap-3 shadow-sm">
-          <AlertCircle className="text-indigo-600 mt-0.5 shrink-0" />
-          <div>
-            <h4 className="text-sm font-bold text-indigo-900">13th Month Pay Mode</h4>
-            <p className="text-xs text-indigo-700 mt-1">
-              Pay is prorated based on months worked this year. Per DOLE rules, this cycle is completely exempt from standard SSS, PhilHealth, Pag-IBIG, and Withholding Tax deductions.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <Card className="shadow-sm border-neutral-200 overflow-hidden">
-        <form action={async (formData) => { "use server"; await saveDraftPayslips(formData); }}>
-          <input type="hidden" name="run_id" value={run.id} />
-          
-          <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* METRICS GRID */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="shadow-sm border-neutral-200">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="p-3 bg-neutral-100 text-neutral-600 rounded-lg"><Users size={20} /></div>
             <div>
-              <CardTitle className="text-lg flex items-center gap-2"><Calculator size={18} className="text-neutral-500" /> Payslip Ledger</CardTitle>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Staff Processed</p>
+              <p className="text-xl font-bold text-neutral-900">{payslips.length}</p>
             </div>
-            <div className="flex gap-6 text-right">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Gross</p>
-                <p className="text-lg font-bold text-neutral-900">{formatCurrency(totalGross)}</p>
-              </div>
-              <div className="pl-6 border-l border-neutral-200">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Total Net Payout</p>
-                <p className="text-xl font-bold text-emerald-600">{formatCurrency(totalNet)}</p>
-              </div>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-neutral-200">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><Calculator size={20} /></div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Gross</p>
+              <p className="text-xl font-bold text-neutral-900">{formatCurrency(totalGross)}</p>
             </div>
-          </CardHeader>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap min-w-[1200px]">
-              <thead className="bg-white border-b border-neutral-200">
-                <tr>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Employee</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Base Inputs (Hrs/Comm)</th>
-                  <th className="px-6 py-4 font-semibold text-amber-600">Overtime (Hrs)</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Gross Pay</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600">Deductions</th>
-                  <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Net Pay</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100 bg-white">
-                {(payslips || []).map((slip) => {
-                  const emp = slip.employees as any;
-                  const bk = slip.breakdown as any || { sss: 0, phic: 0, hdmf: 0, tax: 0, ot_pay: 0 };
-                  const hasZeroCompliance = !emp.sss_enabled && !emp.philhealth_enabled && !emp.pagibig_enabled && !emp.tax_enabled;
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-neutral-200">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="p-3 bg-rose-50 text-rose-600 rounded-lg"><Receipt size={20} /></div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Deductions</p>
+              <p className="text-xl font-bold text-rose-600">-{formatCurrency(totalDeductions)}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-neutral-200 bg-indigo-900 text-white">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="p-3 bg-white/10 text-indigo-100 rounded-lg"><Banknote size={20} /></div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-200">Net Payout</p>
+              <p className="text-xl font-bold text-white">{formatCurrency(totalNet)}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
+      {/* INDIVIDUAL PAYSLIPS LEDGER */}
+      <Card className="shadow-sm border-neutral-200 overflow-hidden">
+        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
+          <CardTitle className="text-lg flex items-center gap-2"><FileText size={18} className="text-neutral-500" /> Generated Payslips</CardTitle>
+          <CardDescription>Individual compensation breakdowns for this cycle.</CardDescription>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap min-w-[900px]">
+            <thead className="bg-white border-b border-neutral-200">
+              <tr>
+                <th className="px-6 py-4 font-semibold text-neutral-600">Employee</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Gross Pay</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Deductions</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Net Pay</th>
+                <th className="px-6 py-4 font-semibold text-neutral-600 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 bg-white">
+              {payslips.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-6 py-12 text-center text-neutral-500">No payslips found in this run.</td>
+                </tr>
+              ) : (
+                payslips.map((slip: any) => {
+                  const emp = slip.employees;
+                  const deductions = Number(slip.gross_pay) - Number(slip.net_pay);
+                  
                   return (
                     <tr key={slip.id} className="hover:bg-neutral-50 transition-colors">
                       <td className="px-6 py-4">
                         <p className="font-bold text-neutral-900">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-[10px] text-neutral-500 mt-0.5">Base: {formatCurrency(Number(emp.base_rate))} • {emp.pay_type.replace('_', ' ')}</p>
+                        <p className="text-xs text-neutral-500 uppercase tracking-wider mt-0.5">{emp.position || 'Staff'}</p>
                       </td>
-
-                      <td className="px-6 py-4">
-                        {isDraft && !is13thMonth ? (
-                          emp.pay_type === 'HOURLY' ? (
-                            <div className="flex items-center gap-2"><Input type="number" step="0.5" name={`hours_worked_${slip.id}`} defaultValue={slip.hours_worked} className="w-20 h-8 text-xs" /><span className="text-[10px] text-neutral-500">hrs</span></div>
-                          ) : emp.pay_type === 'COMMISSION' ? (
-                            <div className="flex items-center gap-2"><span className="text-[10px] text-neutral-500">₱</span><Input type="number" step="0.01" name={`commission_earned_${slip.id}`} defaultValue={slip.commission_earned} className="w-24 h-8 text-xs" /></div>
-                          ) : (<span className="text-[10px] text-neutral-400 italic">Auto Base</span>)
-                        ) : (
-                          <div className="text-xs font-medium text-neutral-700">{is13thMonth ? '13th Month Pay' : emp.pay_type === 'HOURLY' ? `${slip.hours_worked} hrs` : emp.pay_type === 'COMMISSION' ? formatCurrency(Number(slip.commission_earned)) : '-'}</div>
-                        )}
+                      <td className="px-6 py-4 font-medium text-neutral-600 text-right">
+                        {formatCurrency(Number(slip.gross_pay))}
                       </td>
-
-                      <td className="px-6 py-4">
-                        {isDraft && !is13thMonth ? (
-                          <div className="flex items-center gap-2">
-                            <Input type="number" step="0.5" name={`overtime_hours_${slip.id}`} defaultValue={slip.overtime_hours} className="w-20 h-8 bg-amber-50/50 border-amber-200 text-xs focus-visible:ring-amber-500" />
-                            <span className="text-[10px] text-amber-700 font-medium">hrs (+25%)</span>
-                          </div>
-                        ) : (
-                          <div className="text-xs font-medium text-neutral-700">{is13thMonth ? '-' : `${slip.overtime_hours || 0} hrs`}</div>
-                        )}
-                        {bk.ot_pay > 0 && <span className="text-[9px] text-emerald-600 block mt-1 font-bold">+ {formatCurrency(bk.ot_pay)}</span>}
+                      <td className="px-6 py-4 font-bold text-rose-600 text-right">
+                        -{formatCurrency(deductions)}
                       </td>
-
-                      <td className="px-6 py-4 text-right"><p className="font-bold text-neutral-900">{formatCurrency(Number(slip.gross_pay))}</p></td>
-
-                      <td className="px-6 py-4">
-                        {is13thMonth ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-500 italic"><ShieldOff size={10} /> Exempt by DOLE</span>
-                        ) : hasZeroCompliance || Number(slip.gross_pay) === 0 ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-neutral-400 italic"><ShieldOff size={10} /> No deductions</span>
-                        ) : (
-                          <div className="flex flex-col gap-1">
-                            {emp.sss_enabled && bk.sss > 0 && <span className="text-[10px] text-rose-600 font-medium">SSS: -{formatCurrency(bk.sss)}</span>}
-                            {emp.philhealth_enabled && bk.phic > 0 && <span className="text-[10px] text-rose-600 font-medium">PHIC: -{formatCurrency(bk.phic)}</span>}
-                            {emp.pagibig_enabled && bk.hdmf > 0 && <span className="text-[10px] text-rose-600 font-medium">HDMF: -{formatCurrency(bk.hdmf)}</span>}
-                            {emp.tax_enabled && bk.tax > 0 && <span className="text-[10px] text-purple-700 font-bold border-t border-rose-100 pt-0.5 mt-0.5">TAX: -{formatCurrency(bk.tax)}</span>}
-                          </div>
-                        )}
+                      <td className="px-6 py-4 font-black text-indigo-700 text-right text-base">
+                        {formatCurrency(Number(slip.net_pay))}
                       </td>
-
-                      <td className="px-6 py-4 text-right"><p className="font-bold text-emerald-600 text-base">{formatCurrency(Number(slip.net_pay))}</p></td>
+                      <td className="px-6 py-4 text-center">
+                        {/* THE FIX: Changed to SHALLOW ROUTING */}
+                        <Link href={`/payslip/${slip.id}`}>
+                          <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 transition-colors shadow-sm">
+                            <ExternalLink size={14} className="mr-1.5" /> View Payslip
+                          </Button>
+                        </Link>
+                      </td>
                     </tr>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
-          
-          {isDraft && !is13thMonth && (
-            <div className="bg-neutral-50/50 border-t border-neutral-100 p-4 flex justify-end">
-              <SubmitButton title="Save & Recalculate Totals" className="bg-neutral-900 text-white hover:bg-neutral-800 shadow-sm" />
-            </div>
-          )}
-        </form>
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </Card>
+
     </div>
   );
 }

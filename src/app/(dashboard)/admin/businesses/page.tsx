@@ -11,14 +11,17 @@ import ManageOrgLimitButton from "./ManageOrgLimitButton";
 import ManageFeaturesButton from "./ManageFeaturesButton";
 import ManageInventoryButton from "./ManageInventoryButton"; 
 import ManagePayrollButton from "./ManagePayrollButton"; 
-import ManagePlannerButton from "./ManagePlannerButton"; // NEW
-import ManageReportsButton from "./ManageReportsButton"; // NEW
+import ManagePlannerButton from "./ManagePlannerButton"; 
+import ManageReportsButton from "./ManageReportsButton"; 
 import ApproveTenantDialog from "./ApproveTenantDialog";
 import ManageBillingDialog from "./ManageBillingDialog";
 import OwnerProfileDialog from "./OwnerProfileDialog"; 
 import Link from "next/link";
 import React from "react";
 import { ChevronDown, Mail } from "lucide-react"; 
+
+// THE FIX 1: Import Universal Pagination Component
+import TablePagination from "@/components/TablePagination";
 
 // ============================================================================
 // HELPER FUNCTIONS FOR CLEAN JSX
@@ -72,13 +75,20 @@ function renderSystemStatus(biz: any) {
 }
 
 export default async function SuperAdminBusinessesPage(props: { 
-  searchParams: Promise<{ search?: string, tier?: string, billing?: string, status?: string }> 
+  // THE FIX 2: Added "page" to the Search Params
+  searchParams: Promise<{ search?: string, tier?: string, billing?: string, status?: string, page?: string }> 
 }) {
   const params = await props.searchParams;
   const searchStr = params?.search?.toLowerCase() || '';
   const tierFilter = params?.tier || 'all';
   const billingFilter = params?.billing || 'all';
   const statusFilter = params?.status || 'all';
+
+  // PAGINATION SETUP
+  const ITEMS_PER_PAGE = 50;
+  const currentPage = parseInt(params?.page || '1');
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -166,6 +176,12 @@ export default async function SuperAdminBusinessesPage(props: {
     return Math.max(...datesB) - Math.max(...datesA);
   });
 
+  // ============================================================================
+  // THE FIX 3: IN-MEMORY SERVER SLICE FOR HIERARCHICAL PAGINATION
+  // ============================================================================
+  const totalItems = processedPortfolios.length;
+  const paginatedPortfolios = processedPortfolios.slice(startIndex, endIndex);
+
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12">
       <div>
@@ -176,6 +192,10 @@ export default async function SuperAdminBusinessesPage(props: {
       <Card className="shadow-sm border-neutral-200 bg-white">
         <CardContent className="p-4 md:p-5">
           <form method="GET" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+            
+            {/* THE FIX 4: Reset Page to 1 when a new search/filter is executed! */}
+            <input type="hidden" name="page" value="1" />
+            
             <div className="lg:col-span-2 space-y-1.5">
               <Label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Global Search</Label>
               <Input name="search" placeholder="Search owner name, email, phone, or workspace..." defaultValue={params?.search} className="bg-neutral-50 border-neutral-200" />
@@ -219,12 +239,13 @@ export default async function SuperAdminBusinessesPage(props: {
         </CardContent>
       </Card>
 
-      <Card className="shadow-sm border-neutral-200 overflow-hidden">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-200 py-4">
+      {/* THE FIX 5: Layout adjust for Pagination placement */}
+      <Card className="shadow-sm border-neutral-200 overflow-hidden flex flex-col bg-white">
+        <CardHeader className="bg-neutral-50/50 border-b border-neutral-200 py-4 shrink-0">
           <CardTitle className="text-lg">Workspace Management</CardTitle>
           <CardDescription>Hierarchical view of primary workspaces and their sub-organizations.</CardDescription>
         </CardHeader>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto flex-1">
           <table className="w-full text-left text-sm whitespace-nowrap min-w-[1200px]">
             <thead className="bg-neutral-100/50 border-b border-neutral-200">
               <tr>
@@ -235,7 +256,7 @@ export default async function SuperAdminBusinessesPage(props: {
                 <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Actions</th>
               </tr>
             </thead>
-            {processedPortfolios.length === 0 ? (
+            {paginatedPortfolios.length === 0 ? (
               <tbody>
                 <tr>
                   <td colSpan={5} className="px-6 py-16 text-center text-neutral-500 bg-white">
@@ -247,7 +268,7 @@ export default async function SuperAdminBusinessesPage(props: {
                 </tr>
               </tbody>
             ) : (
-              processedPortfolios.map((portfolio) => (
+              paginatedPortfolios.map((portfolio) => (
                 <tbody key={portfolio.mainAccount.id} className="border-b-[6px] border-neutral-100/80 bg-white">
                   
                   {/* PRIMARY WORKSPACE (ROOT NODE) */}
@@ -278,7 +299,6 @@ export default async function SuperAdminBusinessesPage(props: {
                           <OwnerProfileDialog owner={portfolio.ownerDetails} businesses={[portfolio.mainAccount, ...portfolio.subAccounts]} />
                           {portfolio.ownerDetails?.id && <ManageOrgLimitButton ownerId={portfolio.ownerDetails.id} ownerName={portfolio.ownerDetails.full_name || 'Unknown'} currentLimit={portfolio.ownerDetails.max_businesses_limit || 1} />}
                         </div>
-                        {/* THE FIX: Increased max-w to 600px to allow all toggle buttons to wrap cleanly without breaking UI */}
                         <div className="flex items-center gap-1.5 w-full justify-end flex-wrap max-w-[600px]">
                           <span className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mr-2">Workspace Setup:</span>
                           {portfolio.mainAccount.status === 'pending' ? (
@@ -291,7 +311,6 @@ export default async function SuperAdminBusinessesPage(props: {
                               <ManagePayrollButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_payroll_access} />
                               <ManageInventoryButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_inventory_access} />
                               
-                              {/* THE FIX: New Planner & Reports Toggles Injected */}
                               <ManagePlannerButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_planner_access} />
                               <ManageReportsButton businessId={portfolio.mainAccount.id} businessName={portfolio.mainAccount.business_name} currentAccess={portfolio.mainAccount.has_reports_access} />
 
@@ -333,7 +352,6 @@ export default async function SuperAdminBusinessesPage(props: {
                               <ManagePayrollButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_payroll_access} />
                               <ManageInventoryButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_inventory_access} />
                               
-                              {/* THE FIX: New Planner & Reports Toggles Injected */}
                               <ManagePlannerButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_planner_access} />
                               <ManageReportsButton businessId={biz.id} businessName={biz.business_name} currentAccess={biz.has_reports_access} />
 
@@ -349,6 +367,13 @@ export default async function SuperAdminBusinessesPage(props: {
             )}
           </table>
         </div>
+        
+        {/* THE FIX 6: Render the Universal Pagination UI */}
+        <TablePagination 
+          totalItems={totalItems} 
+          itemsPerPage={ITEMS_PER_PAGE} 
+          currentPage={currentPage} 
+        />
       </Card>
     </div>
   );

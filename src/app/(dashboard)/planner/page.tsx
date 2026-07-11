@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import PlannerBoard from "@/features/planner/components/PlannerBoard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Lock, ArrowLeft } from "lucide-react";
+import { Lock, ArrowLeft, Info } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = 'force-dynamic';
@@ -23,10 +23,6 @@ export default async function PlannerPage() {
     .eq("id", user.id)
     .single();
 
-  // ========================================================================
-  // THE FIX: GRACEFUL DEGRADATION FOR STAFF ACCOUNTS
-  // Instead of a confusing redirect, we explicitly explain the restriction.
-  // ========================================================================
   if (profile?.role === 'staff') {
     return (
       <div className="flex items-center justify-center min-h-[60vh] px-4 animate-in fade-in zoom-in-95 duration-500">
@@ -59,13 +55,44 @@ export default async function PlannerPage() {
   const bizData = profile?.businesses as any;
   const currency = Array.isArray(bizData) ? bizData[0]?.currency : bizData?.currency || "PHP";
 
-  // 2. FETCH GOALS (This block is physically impossible for staff to reach)
+  // 2. FETCH GOALS
   const { data: goals } = await supabase
     .from("business_goals")
     .select("*")
     .eq("business_id", businessId)
     .order("created_at", { ascending: false });
 
-  // Pass raw data to the Interactive Client Component
-  return <PlannerBoard initialGoals={goals || []} currency={currency} />;
+  return (
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
+      
+      {/* HEADER SECTION */}
+      <div>
+        <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-neutral-900">Business Planner</h2>
+        <p className="text-sm md:text-base text-neutral-500 mt-1">Map your operational goals, marketing strategies, and budgets.</p>
+      </div>
+
+      {/* ============================================================================ */}
+      {/* THE FIX: THE QUICK GUIDE INJECTION */}
+      {/* ============================================================================ */}
+      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
+            <Info size={16} />
+          </div>
+          <div className="w-full">
+            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-2.5">Quick Guide: How to Use the Kanban Board</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-3 text-xs sm:text-sm text-blue-800 leading-relaxed">
+              <p><strong className="font-bold text-blue-950 block mb-0.5">1. Planned</strong> Log future ideas, pending marketing campaigns, or unapproved budgets here.</p>
+              <p><strong className="font-bold text-blue-950 block mb-0.5">2. In Progress</strong> Use the action buttons to move a goal here when it actively starts consuming time or money.</p>
+              <p><strong className="font-bold text-blue-950 block mb-0.5">3. Achieved</strong> Move completed goals here to permanently archive your successes and review your spent budgets.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Pass raw data to the Interactive Client Component */}
+      <PlannerBoard initialGoals={goals || []} currency={currency} />
+      
+    </div>
+  );
 }

@@ -6,12 +6,21 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from "next/link";
 import NewRunDialog from "./NewRunDialog";
+// THE FIX 1: Import our new Universal Pagination Component
+import TablePagination from "@/components/TablePagination"; 
 import { Calculator, Users, Clock, FileText, CheckCircle2, AlertCircle, CalendarRange, Search } from "lucide-react"; 
 
-export default async function PayrollHubPage(props: { searchParams: Promise<{ search?: string, status?: string }> }) {
+// THE FIX 2: Added "page" to the expected search parameters
+export default async function PayrollHubPage(props: { searchParams: Promise<{ search?: string, status?: string, page?: string }> }) {
   const params = await props.searchParams;
-  const searchStr = params?.search?.toLowerCase() || '';
+  const searchStr = params?.search || '';
   const statusFilter = params?.status || 'ALL';
+  
+  // PAGINATION SETUP
+  const ITEMS_PER_PAGE = 50;
+  const currentPage = parseInt(params?.page || '1');
+  const from = (currentPage - 1) * ITEMS_PER_PAGE;
+  const to = from + ITEMS_PER_PAGE - 1;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -21,33 +30,36 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
 
-  // 1. DYNAMIC DATABASE QUERY (Status Filter)
+  // ============================================================================
+  // THE FIX 3: DATABASE-LEVEL FILTERING & SERVER-SIDE PAGINATION
+  // Notice { count: 'exact' }. We ask Supabase to count the rows before applying the limit!
+  // ============================================================================
   let query = supabase
     .from("payroll_runs")
     .select(`
       id, period_start, period_end, run_date, status, created_at,
       payslips ( id, gross_pay, net_pay )
-    `)
+    `, { count: 'exact' })
     .eq("business_id", businessId)
     .order("created_at", { ascending: false });
 
+  // DB Filter: Status
   if (statusFilter !== 'ALL') {
     query = query.eq("status", statusFilter);
   }
 
-  const { data: rawPayrollRuns } = await query;
-  let payrollRuns = rawPayrollRuns || [];
-
-  // 2. IN-MEMORY DATE SEARCH
+  // DB Filter: Search (Casts dates to string in Postgres to allow partial matches like "2026" or "07")
   if (searchStr) {
-    payrollRuns = payrollRuns.filter(run => {
-      const startStr = new Date(run.period_start).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toLowerCase();
-      const endStr = new Date(run.period_end).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toLowerCase();
-      const runStr = new Date(run.run_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase();
-      
-      return startStr.includes(searchStr) || endStr.includes(searchStr) || runStr.includes(searchStr);
-    });
+    query = query.or(`period_start.ilike.%${searchStr}%,period_end.ilike.%${searchStr}%,run_date.ilike.%${searchStr}%`);
   }
+
+  // DB Filter: Apply Pagination Limits
+  query = query.range(from, to);
+
+  // Fetch the data AND the total row count
+  const { data: rawPayrollRuns, count } = await query;
+  const payrollRuns = rawPayrollRuns || [];
+  const totalItems = count || 0;
 
   // Fetch quick stats
   const { count: activeEmployees } = await supabase.from("employees").select("*", { count: 'exact', head: true }).eq("business_id", businessId).eq("is_active", true);
@@ -90,7 +102,7 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
           <Search className="w-5 h-5 text-neutral-400 ml-2" />
           <Input 
             name="search" 
-            placeholder="Search by month (e.g. Jan) or year..." 
+            placeholder="Search Date (e.g. 2026 or 07)..." 
             defaultValue={searchStr} 
             className="border-none shadow-none focus-visible:ring-0 text-base w-full" 
           />
@@ -107,17 +119,20 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
               <SelectItem value="PAID">Disbursed</SelectItem>
             </SelectContent>
           </Select>
+          {/* Reset Page to 1 when applying a new filter! */}
+          <input type="hidden" name="page" value="1" />
           <Button type="submit" className="bg-neutral-900 text-white hover:bg-neutral-800 shrink-0">Filter</Button>
         </div>
       </form>
 
       {/* PAYROLL RUNS LEDGER */}
-      <Card className="shadow-sm border-neutral-200 overflow-hidden">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
+      <Card className="shadow-sm border-neutral-200 overflow-hidden flex flex-col">
+        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 shrink-0">
           <CardTitle className="text-lg flex items-center gap-2"><Calculator size={18} className="text-neutral-500" /> Payroll History</CardTitle>
           <CardDescription>Review drafts, finalized calculations, and posted payouts.</CardDescription>
         </CardHeader>
-        <div className="overflow-x-auto">
+        
+        <div className="overflow-x-auto flex-1">
           <table className="w-full text-left text-sm whitespace-nowrap min-w-[900px]">
             <thead className="bg-white border-b border-neutral-200">
               <tr>
@@ -203,6 +218,13 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
             </tbody>
           </table>
         </div>
+        
+        {/* THE FIX 4: Render the Universal Pagination UI */}
+        <TablePagination 
+          totalItems={totalItems} 
+          itemsPerPage={ITEMS_PER_PAGE} 
+          currentPage={currentPage} 
+        />
       </Card>
     </div>
   );
