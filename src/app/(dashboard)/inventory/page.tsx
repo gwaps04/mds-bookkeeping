@@ -1,5 +1,6 @@
 // src/app/(dashboard)/inventory/page.tsx
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation"; // THE FIX: Imported redirect for the Hard Guard
 import ItemRowActions from "@/features/inventory/components/ItemRowActions"; 
 import AddItemForm from "@/features/inventory/components/AddItemForm"; 
 import LogStockMovementForm from "@/features/inventory/components/LogStockMovementForm"; 
@@ -30,11 +31,43 @@ export default async function InventoryPage(props: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from("profiles").select("business_id, businesses(currency)").eq("id", user?.id).single();
+  if (!user) redirect("/login");
+
+  // ============================================================================
+  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags for Inventory
+  // ============================================================================
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(`
+      role, 
+      can_access_inventory, 
+      business_id, 
+      businesses(currency, has_inventory_access)
+    `)
+    .eq("id", user.id)
+    .single();
+
   const businessId = profile?.business_id;
-  
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
+
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+  const bizHasInventory = bizData?.has_inventory_access === true;
+
+  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
+  if (!bizHasInventory && !isSuperAdmin) {
+    redirect("/dashboard");
+  }
+
+  // Key 2: If the user is a staff member WITHOUT explicit Inventory clearance, kick them out.
+  if (!isOwner && profile?.can_access_inventory !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
 
   // ============================================================================
   // THE FORM QUERY

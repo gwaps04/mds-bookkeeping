@@ -1,19 +1,15 @@
 // src/app/(dashboard)/income/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { createIncome } from "@/features/income/actions";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import SubmitButton from "@/components/SubmitButton";
-import { Lock, Banknote } from "lucide-react"; 
+import { Banknote, Lock } from "lucide-react"; 
 
 import { IncomeEditInterceptor, IncomeDeleteDialog } from "./IncomeActionDialogs";
+import RecordIncomeForm from "./RecordIncomeForm"; // THE FIX: Import the new component
 import { getTenantAccessLevel } from "@/lib/subscription";
-
 import TablePagination from "@/components/TablePagination"; 
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +34,6 @@ export default async function IncomePage(props: {
   
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
 
-  // PAGINATION SETUP
   const ITEMS_PER_PAGE = 50;
   const currentPage = parseInt(params?.page || '1');
   const from = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -81,9 +76,6 @@ export default async function IncomePage(props: {
     }
   }
 
-  // ============================================================================
-  // DATABASE-LEVEL FILTERING WITH PAGINATION LIMITS
-  // ============================================================================
   let query = supabase
     .from("income")
     .select(`
@@ -94,10 +86,7 @@ export default async function IncomePage(props: {
     .eq("business_id", profile?.business_id)
     .order("date", { ascending: false });
 
-  if (params?.search) {
-    query = query.ilike("description", `%${params.search}%`); 
-  }
-  
+  if (params?.search) query = query.ilike("description", `%${params.search}%`); 
   if (startDate) query = query.gte("date", startDate);
   if (endDate) query = query.lte("date", endDate);
 
@@ -113,7 +102,6 @@ export default async function IncomePage(props: {
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 w-full min-w-0 overflow-x-hidden">
       
-      {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="w-full min-w-0">
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">Income & Sales</h2>
@@ -121,7 +109,6 @@ export default async function IncomePage(props: {
         </div>
       </div>
 
-      {/* THE FIX 1: Add min-w-0 to the master grid and its columns to prevent Grid Blowout! */}
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
         {/* LEFT COLUMN: CREATION FORM */}
@@ -134,85 +121,14 @@ export default async function IncomePage(props: {
               <CardDescription>Log money entering the business.</CardDescription>
             </CardHeader>
             <CardContent className="pt-5">
-              <form action={async (formData) => {
-                "use server";
-                await createIncome(formData);
-              }} className="space-y-4 w-full">
-                
-                <div className="space-y-1.5 w-full">
-                  <Label htmlFor="customer_name" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Customer / Entity</Label>
-                  <Input id="customer_name" name="customer_name" placeholder="e.g. Walk-in, Business Owner" required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 sm:gap-4 w-full">
-                  <div className="space-y-1.5 w-full">
-                    <Label htmlFor="amount" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Amount</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0" placeholder="0.00" required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
-                  </div>
-                  <div className="space-y-1.5 w-full">
-                    <Label htmlFor="date" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Date</Label>
-                    <Input id="date" name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required disabled={isLocked} className="w-full focus-visible:ring-green-600" />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 w-full">
-                  <Label htmlFor="category_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Category</Label>
-                  <Select name="category_id" required disabled={isLocked}>
-                    <SelectTrigger className="w-full focus:ring-green-600">
-                      <SelectValue placeholder="Select category..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[250px] w-full">
-                      {revenueCategories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5 w-full">
-                  <Label htmlFor="account_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Deposit To (Bank)</Label>
-                  <Select name="account_id" required disabled={isLocked}>
-                    <SelectTrigger className="w-full focus:ring-green-600">
-                      <SelectValue placeholder="Select account..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[250px] w-full">
-                      {bankAccounts.map((acc) => (
-                        <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5 w-full">
-                  <Label htmlFor="reference_number" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Ref No. (Optional)</Label>
-                  <Input id="reference_number" name="reference_number" placeholder="e.g. GCash Ref, Check No." disabled={isLocked} className="w-full focus-visible:ring-green-600" />
-                </div>
-
-                <div className="space-y-1.5 w-full">
-                  <Label htmlFor="description" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Notes (Optional)</Label>
-                  <Textarea 
-                    id="description" 
-                    name="description" 
-                    placeholder="Provide details about this transaction..." 
-                    className="w-full resize-none h-16 focus-visible:ring-green-600"
-                    disabled={isLocked}
-                  />
-                </div>
-
-                <div className="pt-2 w-full">
-                  {isLocked ? (
-                    <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 h-11 md:h-10">
-                      <Lock size={16} /> Creation Locked
-                    </Button>
-                  ) : (
-                    <SubmitButton 
-                      title="Record Income" 
-                      loadingTitle="Saving Record..." 
-                      className="w-full bg-green-600 hover:bg-green-700 text-white font-bold transition-all h-11 md:h-10 shadow-sm" 
-                    />
-                  )}
-                </div>
-              </form>
+              
+              {/* THE FIX: Inject the clean Client Component here */}
+              <RecordIncomeForm 
+                revenueCategories={revenueCategories} 
+                bankAccounts={bankAccounts} 
+                isLocked={isLocked} 
+              />
+              
             </CardContent>
           </Card>
         </div>
@@ -251,7 +167,7 @@ export default async function IncomePage(props: {
             </CardContent>
           </Card>
 
-          {/* INCOME LEDGER - FLUID OPTIMIZED */}
+          {/* INCOME LEDGER */}
           <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
             <CardContent className="p-0 flex-1 w-full overflow-hidden">
               <div className="w-full overflow-x-auto">

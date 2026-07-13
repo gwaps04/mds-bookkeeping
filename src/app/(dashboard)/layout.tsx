@@ -17,11 +17,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login");
 
   // ==========================================================================================
-  // THE FIX 1: Added has_planner_access and has_reports_access to the database fetch query!
+  // THE FIX 1: Add can_access_taxes to the query payload
   // ==========================================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, business_id, full_name, businesses(status, business_name, is_tax_registered, has_inventory_access, has_payroll_access, has_planner_access, has_reports_access)")
+    .select(`
+      role, 
+      business_id, 
+      full_name, 
+      can_access_payroll, 
+      can_access_inventory, 
+      can_access_expenses,
+      can_access_taxes,
+      businesses(
+        status, 
+        business_name, 
+        is_tax_registered, 
+        has_inventory_access, 
+        has_payroll_access, 
+        has_planner_access, 
+        has_reports_access
+      )
+    `)
     .eq("id", user.id)
     .single();
 
@@ -33,15 +50,27 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const businessStatus = Array.isArray(bizData) ? bizData[0]?.status : bizData?.status;
   const rawBusinessName = Array.isArray(bizData) ? bizData[0]?.business_name : bizData?.business_name;
   
-  const isTaxEnabled = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
-  const hasInventoryAccess = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
-  const hasPayrollAccess = Array.isArray(bizData) ? bizData[0]?.has_payroll_access : bizData?.has_payroll_access; 
+  // Base Business Subscription Capabilities
+  const bizHasInventory = Array.isArray(bizData) ? bizData[0]?.has_inventory_access : bizData?.has_inventory_access;
+  const bizHasPayroll = Array.isArray(bizData) ? bizData[0]?.has_payroll_access : bizData?.has_payroll_access; 
+  const bizHasPlanner = Array.isArray(bizData) ? bizData[0]?.has_planner_access : bizData?.has_planner_access;
+  const bizHasReports = Array.isArray(bizData) ? bizData[0]?.has_reports_access : bizData?.has_reports_access; 
+  const bizIsTaxReg = Array.isArray(bizData) ? bizData[0]?.is_tax_registered : bizData?.is_tax_registered;
+
+  // ==========================================================================================
+  // THE FIX 2: THE TWO-KEY PERMISSION CALCULATOR 
+  // ==========================================================================================
+  // A module is only visible if the business pays for it AND the user has explicit permission.
+  // Business Owners and Super Admins bypass the user-level check.
+  const hasInventoryAccess = bizHasInventory && (isBusinessOwner || isSuperAdmin || profile?.can_access_inventory);
+  const hasPayrollAccess = bizHasPayroll && (isBusinessOwner || isSuperAdmin || profile?.can_access_payroll);
   
-  // ==========================================================================================
-  // THE FIX 2: Extracted the new boolean flags from the data
-  // ==========================================================================================
-  const hasPlannerAccess = Array.isArray(bizData) ? bizData[0]?.has_planner_access : bizData?.has_planner_access;
-  const hasReportsAccess = Array.isArray(bizData) ? bizData[0]?.has_reports_access : bizData?.has_reports_access; 
+  // Taxes now require the Business Setting AND the explicit Staff Flag
+  const isTaxEnabled = bizIsTaxReg && (isBusinessOwner || isSuperAdmin || profile?.can_access_taxes);
+  
+  // Planners and Reports are strictly locked to Owners/Admins in the SideNav logic
+  const hasPlannerAccess = bizHasPlanner && (isBusinessOwner || isSuperAdmin);
+  const hasReportsAccess = bizHasReports && (isBusinessOwner || isSuperAdmin);
 
   let ownedCompanies: any[] = [];
   if (isBusinessOwner) {
@@ -84,9 +113,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <h1 className="text-xl font-bold tracking-tight text-neutral-900">MacroBiz</h1>
         </div>
         
-        {/* ========================================================================== */}
-        {/* THE FIX 3: Passed the new props into the Desktop SideNav */}
-        {/* ========================================================================== */}
         <SideNav 
           role={profile?.role} 
           isTaxEnabled={isTaxEnabled} 
@@ -100,7 +126,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="p-4 border-t border-neutral-200 shrink-0">
           <form action={logout}>
             <button type="submit" className="w-full flex items-center justify-center px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors">
-              Secure Sign Out
+               Secure Sign Out
             </button>
           </form>
         </div>
@@ -113,9 +139,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="h-16 bg-white border-b border-neutral-200 flex items-center px-4 md:px-6 justify-between shrink-0 print:hidden relative z-30">
           <div className="flex items-center gap-3 md:hidden">
             
-            {/* ========================================================================== */}
-            {/* THE FIX 4: Passed the new props into the MobileNav */}
-            {/* ========================================================================== */}
             <MobileNav 
               role={profile?.role} 
               isTaxEnabled={isTaxEnabled} 

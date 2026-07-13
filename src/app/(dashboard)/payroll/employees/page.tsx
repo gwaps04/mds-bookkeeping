@@ -1,5 +1,6 @@
 // src/app/(dashboard)/payroll/employees/page.tsx
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation"; // THE FIX: Imported redirect
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -30,10 +31,43 @@ export default async function EmployeeDirectoryPage(props: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from("profiles").select("business_id, businesses(currency)").eq("id", user?.id).single();
+  if (!user) redirect("/login");
+
+  // ============================================================================
+  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags
+  // ============================================================================
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(`
+      role, 
+      can_access_payroll, 
+      business_id, 
+      businesses(currency, has_payroll_access)
+    `)
+    .eq("id", user.id)
+    .single();
+
   const businessId = profile?.business_id;
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
+
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE LATERAL MOVEMENT PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+  const bizHasPayroll = bizData?.has_payroll_access === true;
+
+  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
+  if (!bizHasPayroll && !isSuperAdmin) {
+    redirect("/dashboard");
+  }
+
+  // Key 2: If the user is a staff member WITHOUT explicit HR clearance, kick them out.
+  if (!isOwner && profile?.can_access_payroll !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
 
   let query = supabase
     .from("employees")

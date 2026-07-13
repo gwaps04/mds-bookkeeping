@@ -23,17 +23,34 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
   if (!user) redirect("/login");
 
   // ============================================================================
-  // 1. THE GATEKEEPER: Get Profile & Business Features
+  // 1. THE GATEKEEPER: Get Profile, RBAC Flags & Business Features
   // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, businesses(allow_receipt_uploads)") 
+    .select(`
+      business_id, 
+      role, 
+      can_access_expenses,
+      businesses(allow_receipt_uploads)
+    `) 
     .eq("id", user.id)
     .single();
 
   const businessId = profile?.business_id;
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+
+  // Key 2 (User Scope): If the user is a staff member WITHOUT explicit Expenses clearance, kick them out.
+  if (!isOwner && profile?.can_access_expenses !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
+
   // Evaluates to true UNLESS explicitly set to false by the Super Admin
   const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
 
@@ -69,17 +86,17 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
       {/* HEADER & BACK NAVIGATION */}
       <div className="flex items-center gap-4">
         <Link href="/expenses">
-          <Button variant="outline" size="icon" className="h-9 w-9 rounded-full bg-white">
+          <Button variant="outline" size="icon" className="h-9 w-9 rounded-full bg-white shadow-sm border-neutral-200 hover:bg-neutral-50">
             <ArrowLeft size={16} className="text-neutral-600" />
           </Button>
         </Link>
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-neutral-900">Edit Expense</h2>
-          <p className="text-sm text-neutral-500 mt-0.5">Update transaction details or attach a new receipt.</p>
+          <h2 className="text-2xl font-bold tracking-tight text-neutral-900">Edit Expense</h2>
+          <p className="text-sm text-neutral-500 mt-0.5 font-medium">Update transaction details or attach a new receipt.</p>
         </div>
       </div>
 
-      <Card className="shadow-sm border-neutral-200">
+      <Card className="shadow-sm border-neutral-200 bg-white">
         <CardContent className="p-6">
           <form action={async (formData) => {
             "use server";
@@ -89,20 +106,21 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
             {/* HIDDEN ID FIELD: Required for the backend to know which row to update */}
             <input type="hidden" name="id" value={expense.id} />
 
-            <div className="space-y-2">
-              <Label htmlFor="vendor_name">Vendor / Payee</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="vendor_name" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Vendor / Payee</Label>
               <Input 
                 id="vendor_name" 
                 name="vendor_name" 
                 defaultValue={expense.vendors?.name || ""} 
                 placeholder="e.g. Meralco, Office Warehouse" 
                 required 
+                className="focus-visible:ring-neutral-900 font-medium"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="amount">Amount</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="amount" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Amount</Label>
                 <Input 
                   id="amount" 
                   name="amount" 
@@ -111,35 +129,37 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
                   min="0" 
                   defaultValue={expense.amount} 
                   required 
+                  className="focus-visible:ring-neutral-900 font-bold"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="date">Date</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="date" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Date</Label>
                 <Input 
                   id="date" 
                   name="date" 
                   type="date" 
                   defaultValue={expense.date} 
                   required 
+                  className="focus-visible:ring-neutral-900"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="category_id">Expense Category</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="category_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Expense Category</Label>
                 <Select name="category_id" defaultValue={expense.category_id} required>
-                  <SelectTrigger><SelectValue placeholder="Select category..." /></SelectTrigger>
+                  <SelectTrigger className="focus:ring-neutral-900"><SelectValue placeholder="Select category..." /></SelectTrigger>
                   <SelectContent className="max-h-[300px]">
                     {expenseCategories.map((cat) => <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="account_id">Paid From (Bank / Cash)</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="account_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Paid From (Bank / Cash)</Label>
                 <Select name="account_id" defaultValue={expense.account_id} required>
-                  <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
+                  <SelectTrigger className="focus:ring-neutral-900"><SelectValue placeholder="Select account..." /></SelectTrigger>
                   <SelectContent className="max-h-[300px]">
                     {bankAccounts.map((acc) => <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>)}
                   </SelectContent>
@@ -147,24 +167,25 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="reference_number">Reference No. (Optional)</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="reference_number" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Reference No. (Optional)</Label>
               <Input 
                 id="reference_number" 
                 name="reference_number" 
                 defaultValue={expense.reference_number || ""} 
                 placeholder="e.g. Receipt No." 
+                className="focus-visible:ring-neutral-900 font-mono"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="description">Notes / Details</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="description" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Notes / Details</Label>
               <Textarea 
                 id="description" 
                 name="description" 
                 defaultValue={expense.description || ""} 
                 placeholder="What was this for?" 
-                className="resize-none h-20" 
+                className="resize-none h-20 focus-visible:ring-neutral-900" 
                 required 
               />
             </div>
@@ -185,7 +206,7 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
                     href={expense.receipt_url} 
                     target="_blank" 
                     rel="noopener noreferrer" 
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-md text-xs font-medium transition-colors shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-md text-xs font-bold transition-colors shadow-sm"
                   >
                     <Paperclip size={12} /> View File
                   </a>
@@ -253,12 +274,12 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
 
             <div className="pt-4 flex gap-3">
               <Link href="/expenses" className="flex-1">
-                <Button type="button" variant="outline" className="w-full text-neutral-600">Cancel</Button>
+                <Button type="button" variant="outline" className="w-full text-neutral-600 font-bold border-neutral-200 shadow-sm transition-colors hover:bg-neutral-50">Cancel</Button>
               </Link>
               <SubmitButton 
                 title="Save Changes" 
                 loadingTitle="Saving..." 
-                className="flex-1 bg-neutral-900 text-white hover:bg-neutral-800" 
+                className="flex-[2] bg-neutral-900 text-white hover:bg-neutral-800 font-bold shadow-sm transition-all" 
               />
             </div>
 

@@ -1,5 +1,6 @@
 // src/app/(dashboard)/payroll/page.tsx
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation"; // THE FIX: Added redirect import
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,10 +26,35 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase.from("profiles").select("business_id, businesses(currency)").eq("id", user?.id).single();
+  if (!user) redirect("/login");
+
+  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, can_access_payroll, business_id, businesses(currency, has_payroll_access)")
+    .eq("id", user.id)
+    .single();
+
   const businessId = profile?.business_id;
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
+
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
+  // ============================================================================
+  const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+  const bizHasPayroll = bizData?.has_payroll_access === true;
+
+  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
+  if (!bizHasPayroll && !isSuperAdmin(profile?.role)) {
+    redirect("/dashboard");
+  }
+
+  // Key 2: If the user is a staff member WITHOUT explicit HR clearance, kick them out.
+  if (!isOwner && profile?.can_access_payroll !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
 
   let query = supabase
     .from("payroll_runs")
@@ -56,6 +82,11 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
   const { count: activeEmployees } = await supabase.from("employees").select("*", { count: 'exact', head: true }).eq("business_id", businessId).eq("is_active", true);
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
+
+  // Helper function for the guard
+  function isSuperAdmin(role?: string) {
+    return role === 'super_admin';
+  }
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12 w-full min-w-0 overflow-x-hidden">

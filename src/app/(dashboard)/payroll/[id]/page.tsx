@@ -4,21 +4,36 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Calculator, CheckCircle2, Clock, AlertCircle, Info, Users, Banknote, Receipt, FileText } from "lucide-react";
+import { ArrowLeft, Users, Calculator, Wallet, Clock, AlertCircle, CheckCircle2 } from "lucide-react";
+
+// Import the Action Bar we created
+import PayrollStateActionBar from "@/features/payroll/components/PayrollStateActionBar"; 
+import { saveDraftPayslips } from "@/features/payroll/actions";
+import SubmitButton from "@/components/SubmitButton";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export default async function PayrollRunDetailsPage(props: { params: Promise<{ id: string }> }) {
+export default async function PayrollReviewPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
+  const runId = params.id;
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
 
+  // ============================================================================
+  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags
+  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, businesses(currency)")
+    .select(`
+      role, 
+      can_access_payroll, 
+      business_id, 
+      businesses(currency, has_payroll_access)
+    `)
     .eq("id", user.id)
     .single();
 
@@ -26,170 +41,226 @@ export default async function PayrollRunDetailsPage(props: { params: Promise<{ i
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
 
-  // FETCH THE RUN AND ITS ASSOCIATED PAYSLIPS
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE SUB-ROUTE PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+  const bizHasPayroll = bizData?.has_payroll_access === true;
+
+  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
+  if (!bizHasPayroll && !isSuperAdmin) {
+    redirect("/dashboard");
+  }
+
+  // Key 2: If the user is a staff member WITHOUT explicit HR clearance, kick them out.
+  if (!isOwner && profile?.can_access_payroll !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
+
+  // 1. Fetch the exact Payroll Run
   const { data: run } = await supabase
     .from("payroll_runs")
-    .select(`
-      *,
-      payslips (
-        id,
-        gross_pay,
-        net_pay,
-        employees (first_name, last_name, position, pay_type)
-      )
-    `)
-    .eq("id", params.id)
+    .select("*")
+    .eq("id", runId)
     .eq("business_id", businessId)
     .single();
 
   if (!run) redirect("/payroll");
 
-  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
+  // 2. Fetch the generated Payslips & Employee details
+  const { data: payslips } = await supabase
+    .from("payslips")
+    .select("*, employees(first_name, last_name, position, pay_type, base_rate, pay_schedule)")
+    .eq("payroll_run_id", runId)
+    .order("created_at", { ascending: true });
 
-  const payslips = run.payslips || [];
-  const totalGross = payslips.reduce((sum: number, slip: any) => sum + Number(slip.gross_pay), 0);
-  const totalNet = payslips.reduce((sum: number, slip: any) => sum + Number(slip.net_pay), 0);
+  // 3. Fetch Asset Accounts for the Disburse Dialog
+  const { data: accounts } = await supabase
+    .from("accounts")
+    .select("id, name")
+    .eq("business_id", businessId)
+    .eq("type", "asset")
+    .neq("is_archived", true)
+    .order("name");
+
+  const isDraft = run.status === 'DRAFT';
+  const isFinalized = run.status === 'FINALIZED';
+  const isPaid = run.status === 'PAID';
+
+  const totalGross = (payslips || []).reduce((sum, slip) => sum + Number(slip.gross_pay), 0);
+  const totalNet = (payslips || []).reduce((sum, slip) => sum + Number(slip.net_pay), 0);
   const totalDeductions = totalGross - totalNet;
 
-  const StatusBadge = () => {
-    if (run.status === 'DRAFT') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200"><Clock size={14} /> Pending Review</span>;
-    if (run.status === 'FINALIZED') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200"><AlertCircle size={14} /> Awaiting Payout</span>;
-    if (run.status === 'PAID') return <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200"><CheckCircle2 size={14} /> Disbursed</span>;
-    return null;
-  };
+  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
 
   return (
-    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12">
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-screen-2xl mx-auto pb-12 w-full min-w-0 overflow-x-hidden">
       
-      {/* HEADER & NAV */}
-      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-        <div>
-          <Link href="/payroll" className="inline-flex items-center text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors mb-3">
-            <ArrowLeft size={16} className="mr-1.5" /> Back to Payroll Hub
+      {/* HEADER & PIPELINE ACTIONS */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 w-full min-w-0">
+        <div className="flex items-start gap-4">
+          <Link href="/payroll">
+            <Button variant="outline" size="icon" className="bg-white rounded-full mt-1 shrink-0"><ArrowLeft size={16} /></Button>
           </Link>
-          <div className="flex items-center gap-4">
-            <h2 className="text-2xl md:text-3xl font-semibold tracking-tight text-neutral-900">Cycle Details</h2>
-            <StatusBadge />
-          </div>
-          <p className="text-sm md:text-base text-neutral-500 mt-1">
-            {new Date(run.period_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} — {new Date(run.period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
-            <Info size={16} />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-1.5">Payslip Rendering Update</h3>
-            <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
-              To prevent browser crashing and formatting errors during bulk PDF exports, payslips are now isolated. Click <strong className="font-bold text-blue-950">View Payslip</strong> next to any employee to open and download their perfectly formatted, A4-ready digital document.
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 leading-tight">Payroll Review</h2>
+              
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wider border shadow-sm
+                ${isDraft ? 'bg-amber-50 text-amber-700 border-amber-200' : 
+                  isFinalized ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+                  'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                {isDraft && <Clock size={14} className="shrink-0" />}
+                {isFinalized && <AlertCircle size={14} className="shrink-0" />}
+                {isPaid && <CheckCircle2 size={14} className="shrink-0" />}
+                {isDraft ? 'Step 1: Draft Mode' : isFinalized ? 'Step 2: Awaiting Payout' : 'Step 3: Disbursed'}
+              </span>
+            </div>
+            <p className="text-sm sm:text-base text-neutral-500 mt-1">
+              Period: {new Date(run.period_start).toLocaleDateString()} - {new Date(run.period_end).toLocaleDateString()}
             </p>
           </div>
         </div>
-      </div>
 
-      {/* METRICS GRID */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="shadow-sm border-neutral-200">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="p-3 bg-neutral-100 text-neutral-600 rounded-lg"><Users size={20} /></div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Staff Processed</p>
-              <p className="text-xl font-bold text-neutral-900">{payslips.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-neutral-200">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><Calculator size={20} /></div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Gross</p>
-              <p className="text-xl font-bold text-neutral-900">{formatCurrency(totalGross)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-neutral-200">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="p-3 bg-rose-50 text-rose-600 rounded-lg"><Receipt size={20} /></div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Deductions</p>
-              <p className="text-xl font-bold text-rose-600">-{formatCurrency(totalDeductions)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-neutral-200 bg-indigo-900 text-white">
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="p-3 bg-white/10 text-indigo-100 rounded-lg"><Banknote size={20} /></div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-200">Net Payout</p>
-              <p className="text-xl font-bold text-white">{formatCurrency(totalNet)}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* INDIVIDUAL PAYSLIPS LEDGER */}
-      <Card className="shadow-sm border-neutral-200 overflow-hidden">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
-          <CardTitle className="text-lg flex items-center gap-2"><FileText size={18} className="text-neutral-500" /> Generated Payslips</CardTitle>
-          <CardDescription>Individual compensation breakdowns for this cycle.</CardDescription>
-        </CardHeader>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap min-w-[900px]">
-            <thead className="bg-white border-b border-neutral-200">
-              <tr>
-                <th className="px-6 py-4 font-semibold text-neutral-600">Employee</th>
-                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Gross Pay</th>
-                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Deductions</th>
-                <th className="px-6 py-4 font-semibold text-neutral-600 text-right">Net Pay</th>
-                <th className="px-6 py-4 font-semibold text-neutral-600 text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100 bg-white">
-              {payslips.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-neutral-500">No payslips found in this run.</td>
-                </tr>
-              ) : (
-                payslips.map((slip: any) => {
-                  const emp = slip.employees;
-                  const deductions = Number(slip.gross_pay) - Number(slip.net_pay);
-                  
-                  return (
-                    <tr key={slip.id} className="hover:bg-neutral-50 transition-colors">
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-neutral-900">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-xs text-neutral-500 uppercase tracking-wider mt-0.5">{emp.position || 'Staff'}</p>
-                      </td>
-                      <td className="px-6 py-4 font-medium text-neutral-600 text-right">
-                        {formatCurrency(Number(slip.gross_pay))}
-                      </td>
-                      <td className="px-6 py-4 font-bold text-rose-600 text-right">
-                        -{formatCurrency(deductions)}
-                      </td>
-                      <td className="px-6 py-4 font-black text-indigo-700 text-right text-base">
-                        {formatCurrency(Number(slip.net_pay))}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        {/* THE FIX: Changed to SHALLOW ROUTING */}
-                        <Link href={`/payslip/${slip.id}`}>
-                          <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50 transition-colors shadow-sm">
-                            <ExternalLink size={14} className="mr-1.5" /> View Payslip
-                          </Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        {/* INJECTING THE STATE MACHINE ACTION BAR */}
+        <div className="shrink-0 w-full lg:w-auto border-t lg:border-t-0 pt-4 lg:pt-0 border-neutral-200">
+          <PayrollStateActionBar 
+            runId={runId} 
+            status={run.status} 
+            totalGross={formatCurrency(totalGross)} 
+            accounts={accounts || []} 
+          />
         </div>
-      </Card>
+      </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full min-w-0">
+        
+        {/* SUMMARY CARDS */}
+        <div className="lg:col-span-1 space-y-6 w-full min-w-0">
+          <Card className="shadow-sm border-neutral-200 bg-white">
+            <CardContent className="p-5 space-y-6">
+              
+              <div className="flex items-center gap-4 border-b border-neutral-100 pb-5">
+                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg shrink-0">
+                  <Calculator size={20} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Gross Pay</p>
+                  <p className="text-xl font-bold text-neutral-900 mt-0.5">{formatCurrency(totalGross)}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 border-b border-neutral-100 pb-5">
+                <div className="p-3 bg-rose-50 text-rose-600 rounded-lg shrink-0">
+                  <Wallet size={20} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Statutory Deductions</p>
+                  <p className="text-xl font-bold text-neutral-900 mt-0.5 text-rose-600">-{formatCurrency(totalDeductions)}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 pt-1">
+                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Total Net Disbursed</p>
+                  <p className="text-2xl font-black text-emerald-700 mt-0.5">{formatCurrency(totalNet)}</p>
+                </div>
+              </div>
+
+            </CardContent>
+          </Card>
+
+          {isDraft && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm text-sm text-amber-800 leading-relaxed">
+              <p className="font-bold flex items-center gap-2 mb-1"><AlertCircle size={16} /> Draft Instructions</p>
+              Adjust the hours worked, overtime, and commissions in the table to the right. Click <strong>Save Adjustments</strong> at the bottom to recalculate the taxes and net pay before finalizing.
+            </div>
+          )}
+        </div>
+
+        {/* PAYSLIP EDITOR TABLE */}
+        <div className="lg:col-span-2 w-full min-w-0">
+          <form action={saveDraftPayslips} className="space-y-4">
+            <input type="hidden" name="run_id" value={runId} />
+            
+            <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
+              <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
+                <CardTitle className="text-lg">Employee Calculations</CardTitle>
+              </CardHeader>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap min-w-[800px]">
+                  <thead className="bg-white border-b border-neutral-200">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold text-neutral-600 text-xs">Employee</th>
+                      <th className="px-4 py-3 font-semibold text-neutral-600 text-xs text-center">Reg. Hrs</th>
+                      <th className="px-4 py-3 font-semibold text-neutral-600 text-xs text-center">OT Hrs</th>
+                      <th className="px-4 py-3 font-semibold text-neutral-600 text-xs text-right">Commission</th>
+                      <th className="px-4 py-3 font-semibold text-neutral-600 text-xs text-right">Net Pay</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100 bg-white">
+                    {(payslips || []).map((slip: any) => {
+                      const emp = slip.employees;
+                      return (
+                        <tr key={slip.id} className="hover:bg-neutral-50/50">
+                          <td className="px-4 py-4">
+                            <p className="font-bold text-neutral-900">{emp.first_name} {emp.last_name}</p>
+                            <p className="text-[10px] text-neutral-500 mt-0.5">{emp.position} • {emp.pay_type}</p>
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <input 
+                              type="number" 
+                              name={`hours_worked_${slip.id}`} 
+                              defaultValue={slip.hours_worked || 0} 
+                              disabled={!isDraft || emp.pay_type === 'FIXED_SALARY'}
+                              className="w-16 h-8 text-center border border-neutral-200 rounded text-xs disabled:bg-neutral-100" 
+                            />
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <input 
+                              type="number" 
+                              name={`overtime_hours_${slip.id}`} 
+                              defaultValue={slip.overtime_hours || 0} 
+                              disabled={!isDraft || emp.pay_type === 'COMMISSION'}
+                              className="w-16 h-8 text-center border border-neutral-200 rounded text-xs disabled:bg-neutral-100" 
+                            />
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <input 
+                              type="number" 
+                              name={`commission_earned_${slip.id}`} 
+                              defaultValue={slip.commission_earned || 0} 
+                              disabled={!isDraft}
+                              className="w-24 h-8 text-right px-2 border border-neutral-200 rounded text-xs disabled:bg-neutral-100" 
+                            />
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <p className="font-bold text-emerald-700">{formatCurrency(Number(slip.net_pay))}</p>
+                            <p className="text-[10px] text-neutral-400 mt-0.5">Gross: {formatCurrency(Number(slip.gross_pay))}</p>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {isDraft && (
+                <div className="bg-neutral-50/80 p-4 border-t border-neutral-100 flex justify-end">
+                  <SubmitButton title="Save Adjustments" loadingTitle="Recalculating Taxes..." className="bg-neutral-900 hover:bg-neutral-800 text-white font-bold h-10 px-6 shadow-sm" />
+                </div>
+              )}
+            </Card>
+          </form>
+        </div>
+
+      </div>
     </div>
   );
 }

@@ -435,3 +435,36 @@ export async function create13thMonthRun(formData: FormData) {
   revalidatePath("/payroll");
   redirect(`/payroll/${run!.id}`);
 }
+
+// ============================================================================
+// 7. UNLOCK PAYROLL (REVERT TO DRAFT)
+// ============================================================================
+export async function revertPayrollToDraft(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const runId = formData.get("run_id") as string;
+
+  // SECURITY GUARD: Ensure it has not already been disbursed!
+  const { data: run } = await supabase
+    .from("payroll_runs")
+    .select("status")
+    .eq("id", runId)
+    .single();
+
+  if (run?.status === 'PAID') {
+    throw new Error("Critical Error: Cannot unlock a payroll cycle that has already been disbursed and posted to the ledger.");
+  }
+
+  // Revert back to DRAFT
+  const { error } = await supabase
+    .from("payroll_runs")
+    .update({ status: 'DRAFT', updated_at: new Date().toISOString() })
+    .eq("id", runId);
+
+  if (error) throw new Error(error.message);
+  
+  revalidatePath("/payroll");
+  revalidatePath(`/payroll/${runId}`);
+}

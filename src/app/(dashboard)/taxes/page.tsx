@@ -8,35 +8,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Lock } from "lucide-react"; // THE FIX: Imported Lock icon
+import { Lock } from "lucide-react"; 
 
-// THE FIX: Import the SaaS Engine
 import { getTenantAccessLevel } from "@/lib/subscription";
+import SubmitButton from "@/components/SubmitButton";
 
 export default async function TaxesPage(props: { searchParams: Promise<{ search?: string, from?: string, to?: string }> }) {
   const params = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. Get Profile & Business Data
-  const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user?.id).single();
-  const businessId = profile?.business_id;
-  const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+  if (!user) redirect("/login");
 
   // ============================================================================
-  // 2. THE SAAS SUBSCRIPTION ENGINE
+  // 1. THE GATEKEEPER: Fetching the NEW Tax RBAC Flag
   // ============================================================================
-  const { data: business } = await supabase
-    .from("businesses")
-    .select("is_tax_registered, tax_id, subscription_status, subscription_tier, trial_ends_at")
-    .eq("id", businessId)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(`
+      business_id, 
+      role, 
+      can_access_taxes,
+      businesses(is_tax_registered, tax_id, subscription_status, subscription_tier, trial_ends_at)
+    `)
+    .eq("id", user.id)
     .single();
     
-  if (!business?.is_tax_registered) redirect("/settings");
-
-  const accessState = getTenantAccessLevel(business);
-  const isLocked = accessState.isLocked; // <-- The Master UI Gate
+  const businessId = profile?.business_id;
+  const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
+  
   // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+  
+  // Key 1: If the Business hasn't enabled the Tax module in settings, kick everyone out.
+  if (!bizData?.is_tax_registered && !isSuperAdmin) {
+    redirect("/settings");
+  }
+
+  // Key 2: THE FIX - Now checking the explicit `can_access_taxes` flag!
+  if (!isOwner && profile?.can_access_taxes !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
+
+  const accessState = getTenantAccessLevel(bizData);
+  const isLocked = accessState.isLocked; 
 
   // 3. Fetch Asset Accounts
   const { data: bankAccounts } = await supabase.from("accounts").select("id, name, account_number").eq("business_id", businessId).eq("type", "asset").order("name");
@@ -51,11 +70,9 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
     .eq("business_id", businessId)
     .order("date", { ascending: false });
 
-  // ONLY show expenses categorized as Taxes!
   if (taxCategory) {
     query = query.eq("category_id", taxCategory.id);
   } else {
-    // If they have no tax category yet, artificially force an empty result so it doesn't show all expenses
     query = query.eq("category_id", "00000000-0000-0000-0000-000000000000"); 
   }
 
@@ -67,38 +84,39 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
   const totalTaxesPaid = (taxHistory || []).reduce((sum, record) => sum + Number(record.amount), 0);
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 w-full min-w-0 overflow-x-hidden">
       
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">BIR Tax Tracker</h2>
-          <p className="text-neutral-500 mt-1">Log and monitor your official tax remittances.</p>
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 w-full min-w-0">
+        <div className="w-full">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">BIR Tax Tracker</h2>
+          <p className="text-sm sm:text-base text-neutral-500 mt-1">Log and monitor your official tax remittances.</p>
         </div>
-        <div className="bg-blue-50 border border-blue-100 px-4 py-2 rounded-lg flex items-center gap-3">
-          <span className="text-sm font-medium text-blue-800">Registered TIN:</span>
-          <span className="font-mono font-bold text-blue-900 tracking-wider">{business?.tax_id || 'NOT SET'}</span>
+        <div className="bg-blue-50 border border-blue-100 px-4 py-2 rounded-lg flex items-center gap-3 w-full sm:w-auto shrink-0 shadow-sm">
+          <span className="text-xs sm:text-sm font-medium text-blue-800">Registered TIN:</span>
+          <span className="font-mono font-bold text-blue-900 tracking-wider text-sm sm:text-base">{bizData?.tax_id || 'NOT SET'}</span>
         </div>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-3">
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
         {/* LOG PAYMENT FORM */}
-        <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200 sticky top-8">
-            <CardHeader>
-              <CardTitle className="text-lg">Record Tax Payment</CardTitle>
+        <div className="lg:col-span-1 w-full min-w-0">
+          <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8 bg-white w-full min-w-0">
+            <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 pb-4">
+              <CardTitle className="text-lg font-bold text-neutral-900 flex items-center gap-2">Record Tax Payment</CardTitle>
+              <CardDescription>Log statutory remittances to the BIR.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-5">
               <form action={async (formData) => {
                 "use server";
                 await logTaxPayment(formData);
-              }} className="space-y-4">
+              }} className="space-y-4 w-full">
                 
-                <div className="space-y-2">
-                  <Label htmlFor="form_type">BIR Form Type</Label>
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="form_type" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">BIR Form Type</Label>
                   <Select name="form_type" required disabled={isLocked}>
-                    <SelectTrigger><SelectValue placeholder="Select BIR form..." /></SelectTrigger>
+                    <SelectTrigger className="w-full focus:ring-blue-600 font-bold"><SelectValue placeholder="Select BIR form..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="2551Q">2551Q (Quarterly Percentage Tax)</SelectItem>
                       <SelectItem value="1701Q">1701Q (Quarterly Income Tax)</SelectItem>
@@ -110,55 +128,58 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
                   </Select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="amount">Amount (₱)</Label>
-                    <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required disabled={isLocked} />
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 w-full">
+                  <div className="space-y-1.5 w-full">
+                    <Label htmlFor="amount" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Amount (₱)</Label>
+                    <Input id="amount" name="amount" type="number" step="0.01" min="0.01" required disabled={isLocked} className="w-full focus-visible:ring-blue-600 font-black text-rose-600" />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="date">Date Paid</Label>
-                    <Input id="date" name="date" type="date" required defaultValue={new Date().toISOString().split('T')[0]} disabled={isLocked} />
+                  <div className="space-y-1.5 w-full">
+                    <Label htmlFor="date" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Date Paid</Label>
+                    <Input id="date" name="date" type="date" required defaultValue={new Date().toISOString().split('T')[0]} disabled={isLocked} className="w-full focus-visible:ring-blue-600" />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="account_id">Paid From (Bank / Cash)</Label>
+                <div className="space-y-1.5 w-full">
+                  <Label htmlFor="account_id" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Paid From (Bank / Cash)</Label>
                   <Select name="account_id" required disabled={isLocked}>
-                    <SelectTrigger><SelectValue placeholder="Select account..." /></SelectTrigger>
+                    <SelectTrigger className="w-full focus:ring-blue-600"><SelectValue placeholder="Select account..." /></SelectTrigger>
                     <SelectContent>
                       {bankAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="reference">Reference No. (Optional)</Label>
-                  <Input id="reference" name="reference" placeholder="e.g. eFPS / GCash Ref No." disabled={isLocked} />
+                <div className="space-y-1.5 w-full pb-2">
+                  <Label htmlFor="reference" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Reference No. (Optional)</Label>
+                  <Input id="reference" name="reference" placeholder="e.g. eFPS / GCash Ref No." disabled={isLocked} className="w-full focus-visible:ring-blue-600 font-mono" />
                 </div>
 
-                {/* THE FIX: THE UI MUTATION GATE APPLIED TO THE MAIN CTA */}
-                {isLocked ? (
-                  <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 mt-4">
-                    <Lock size={16} /> Creation Locked
-                  </Button>
-                ) : (
-                  <Button type="submit" className="w-full bg-blue-700 hover:bg-blue-800 text-white mt-4 transition-all">
-                    Log Tax Payment
-                  </Button>
-                )}
+                <div className="pt-2 border-t border-neutral-100 w-full">
+                  {isLocked ? (
+                    <Button disabled type="button" className="w-full bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 h-11 md:h-10">
+                      <Lock size={16} /> Creation Locked
+                    </Button>
+                  ) : (
+                    <SubmitButton 
+                      title="Log Tax Payment" 
+                      loadingTitle="Logging..." 
+                      className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold h-11 md:h-10 shadow-sm transition-all" 
+                    />
+                  )}
+                </div>
               </form>
             </CardContent>
           </Card>
         </div>
 
         {/* RIGHT COLUMN: DATA */}
-        <div className="md:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4 w-full min-w-0">
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="shadow-sm border-neutral-200">
-              <CardContent className="p-6">
-                <p className="text-sm font-medium text-neutral-500 uppercase tracking-wider">Filtered Taxes Paid</p>
-                <p className="text-3xl font-bold text-neutral-900 mt-2">
+          <div className="grid grid-cols-1 gap-4 w-full min-w-0">
+            <Card className="shadow-sm border-neutral-200 bg-white">
+              <CardContent className="p-4 md:p-6 flex flex-col justify-center items-center sm:items-start text-center sm:text-left h-full">
+                <p className="text-[10px] sm:text-xs font-bold text-neutral-500 uppercase tracking-wider">Filtered Taxes Paid</p>
+                <p className="text-3xl sm:text-4xl font-black text-rose-600 mt-2 tracking-tight break-words w-full">
                   ₱{totalTaxesPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </CardContent>
@@ -166,25 +187,27 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
           </div>
 
           {/* SEARCH & FILTER BAR */}
-          <Card className="shadow-sm border-neutral-200 bg-white">
-            <CardContent className="p-4">
-              <form method="GET" className="flex flex-col md:flex-row gap-3 items-end">
-                <div className="flex-1 w-full space-y-1">
-                  <Label className="text-xs text-neutral-500">Search Form</Label>
-                  <Input name="search" placeholder="Search form or ref..." defaultValue={params?.search} />
+          <Card className="shadow-sm border-neutral-200 bg-white w-full min-w-0">
+            <CardContent className="p-4 md:p-5">
+              <form method="GET" className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end w-full">
+                <div className="flex-1 w-full min-w-[200px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Search Form</Label>
+                  <Input name="search" placeholder="Search form or ref..." defaultValue={params?.search} className="bg-neutral-50 border-neutral-200 focus-visible:ring-neutral-900 w-full" />
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">From Date</Label>
-                  <Input type="date" name="from" defaultValue={params?.from} />
+                <div className="w-full sm:w-auto min-w-[130px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">From Date</Label>
+                  <Input type="date" name="from" defaultValue={params?.from} className="bg-neutral-50 border-neutral-200 w-full" />
                 </div>
-                <div className="w-full md:w-36 space-y-1">
-                  <Label className="text-xs text-neutral-500">To Date</Label>
-                  <Input type="date" name="to" defaultValue={params?.to} />
+                <div className="w-full sm:w-auto min-w-[130px] space-y-1.5">
+                  <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">To Date</Label>
+                  <Input type="date" name="to" defaultValue={params?.to} className="bg-neutral-50 border-neutral-200 w-full" />
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                  <Button type="submit" className="bg-neutral-900 text-white">Filter</Button>
+                <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                  <Button type="submit" className="bg-neutral-900 text-white flex-1 sm:flex-none shadow-sm transition-all hover:bg-neutral-800">Filter</Button>
                   {(params?.search || params?.from || params?.to) && (
-                    <Link href="/taxes"><Button variant="outline" className="text-neutral-500">Clear</Button></Link>
+                    <Link href="/taxes" className="flex-1 sm:flex-none">
+                      <Button variant="outline" className="w-full text-neutral-600 border-neutral-200 hover:bg-neutral-50 transition-colors">Clear</Button>
+                    </Link>
                   )}
                 </div>
               </form>
@@ -192,46 +215,50 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
           </Card>
 
           {/* HISTORY TABLE */}
-          <Card className="shadow-sm border-neutral-200">
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap min-w-[500px]">
-                  <thead className="bg-neutral-50 border-b border-t border-neutral-200">
+          <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
+            <CardContent className="p-0 flex-1 w-full overflow-hidden">
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-left text-sm table-auto">
+                  <thead className="bg-neutral-50/80 border-b border-t border-neutral-200">
                     <tr>
-                      <th className="px-4 py-3 font-medium text-neutral-900">Date</th>
-                      <th className="px-4 py-3 font-medium text-neutral-900">Form / Details</th>
-                      <th className="px-4 py-3 font-medium text-neutral-900 text-right">Amount</th>
-                      <th className="px-4 py-3 font-medium text-neutral-900 text-center">Actions</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] whitespace-nowrap w-auto">Date</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] w-full">Form / Details</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] text-right whitespace-nowrap w-auto">Amount</th>
+                      <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] text-center whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-200">
                     {(!taxHistory || taxHistory.length === 0) ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-neutral-500">No tax payments found.</td>
+                        <td colSpan={4} className="px-6 py-16 text-center text-neutral-500">No tax payments found.</td>
                       </tr>
                     ) : (
                       taxHistory.map((record) => (
-                        <tr key={record.id} className="hover:bg-neutral-50 group transition-colors">
-                          <td className="px-4 py-4 text-neutral-500">{new Date(record.date).toLocaleDateString()}</td>
-                          <td className="px-4 py-4">
-                            <p className="font-medium text-neutral-900">{record.description}</p>
-                            {record.reference_number && <p className="text-xs text-neutral-400 font-mono mt-0.5">Ref: {record.reference_number}</p>}
+                        <tr key={record.id} className="hover:bg-neutral-50/60 group transition-colors">
+                          <td className="px-4 sm:px-6 py-4 text-neutral-500 font-medium whitespace-nowrap text-xs sm:text-sm align-top sm:align-middle">
+                            {new Date(record.date).toLocaleDateString()}
                           </td>
-                          <td className="px-4 py-4 font-bold text-red-600 text-right">
+                          <td className="px-4 sm:px-6 py-4 whitespace-normal break-words w-full min-w-[150px] align-middle">
+                            <span className="inline-block bg-blue-100 text-blue-800 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shadow-sm mb-1 border border-blue-200">
+                              {record.description.split(' - ')[0] || 'BIR Form'}
+                            </span>
+                            <p className="font-bold text-neutral-900 text-sm sm:text-base leading-tight mt-1">{record.description}</p>
+                            {record.reference_number && <p className="text-[11px] sm:text-xs text-neutral-400 font-mono mt-1 break-all">Ref: {record.reference_number}</p>}
+                          </td>
+                          <td className="px-4 sm:px-6 py-4 font-black text-rose-600 text-right align-top sm:align-middle whitespace-nowrap text-sm sm:text-base">
                             -₱{Number(record.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                           </td>
-                          <td className="px-4 py-4 text-center">
+                          <td className="px-4 sm:px-6 py-4 text-center align-middle whitespace-nowrap">
                             
-                            {/* THE FIX: THE UI MUTATION GATE APPLIED TO ROW ACTIONS */}
-                            <div className="flex items-center justify-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity focus-within:opacity-100">
                               
                               {isLocked ? (
-                                <Button disabled variant="outline" size="sm" className="h-8 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed">
+                                <Button disabled variant="outline" size="sm" className="w-full sm:w-auto h-8 sm:h-9 px-3 text-xs bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed font-bold">
                                   <Lock size={10} className="mr-1.5" /> Edit
                                 </Button>
                               ) : (
-                                <Link href={`/taxes/${record.id}/edit`}>
-                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50 transition-colors">Edit</Button>
+                                <Link href={`/taxes/${record.id}/edit`} className="w-full sm:w-auto">
+                                  <Button variant="outline" size="sm" className="w-full h-8 sm:h-9 px-3 text-xs bg-white text-blue-600 border-blue-200 hover:bg-blue-50 transition-colors font-bold shadow-sm">Edit</Button>
                                 </Link>
                               )}
 
@@ -239,9 +266,9 @@ export default async function TaxesPage(props: { searchParams: Promise<{ search?
                                 <form action={async (formData) => {
                                   "use server";
                                   await deleteTaxPayment(formData);
-                                }}>
+                                }} className="w-full sm:w-auto">
                                   <input type="hidden" name="id" value={record.id} />
-                                  <Button type="submit" variant="destructive" size="sm" className="h-8 px-3 text-xs">Delete</Button>
+                                  <Button type="submit" variant="destructive" size="sm" className="w-full h-8 sm:h-9 px-3 text-xs font-bold shadow-sm">Delete</Button>
                                 </form>
                               )}
 

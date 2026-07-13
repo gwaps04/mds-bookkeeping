@@ -1,5 +1,6 @@
 // src/app/(dashboard)/expenses/page.tsx
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation"; // THE FIX: Imported redirect for the Hard Guard
 import { createExpense } from "@/features/expenses/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,15 +27,37 @@ export default async function ExpensesPage(props: {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  if (!user) redirect("/login");
+
+  // ============================================================================
+  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags for Expenses
+  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, role, businesses(currency, allow_receipt_uploads)") 
-    .eq("id", user?.id)
+    .select(`
+      business_id, 
+      role, 
+      can_access_expenses,
+      businesses(currency, allow_receipt_uploads)
+    `) 
+    .eq("id", user.id)
     .single();
 
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
-  const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+  
+  // ============================================================================
+  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
+  // ============================================================================
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
+  
+  // Key 1 (Business Scope): Expenses is a core module, so we assume the business always has access to it.
+  // Key 2 (User Scope): If the user is a staff member WITHOUT explicit Expenses clearance, kick them out.
+  if (!isOwner && profile?.can_access_expenses !== true) {
+    redirect("/dashboard");
+  }
+  // ============================================================================
   
   const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
 
@@ -120,7 +143,6 @@ export default async function ExpensesPage(props: {
         </div>
       </div>
 
-      {/* THE FIX 1: Add min-w-0 to the master grid to prevent Blowout */}
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
         {/* LEFT COLUMN: CREATE EXPENSE FORM */}
@@ -289,7 +311,7 @@ export default async function ExpensesPage(props: {
             </CardContent>
           </Card>
 
-          {/* EXPENSE LEDGER - FLUID OPTIMIZED */}
+          {/* EXPENSE LEDGER */}
           <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
             <CardContent className="p-0 flex-1 w-full overflow-hidden">
               <div className="w-full overflow-x-auto">
@@ -331,7 +353,6 @@ export default async function ExpensesPage(props: {
                               <p className="font-bold text-neutral-900 text-sm sm:text-base leading-tight">{vendorName}</p>
                               <p className="text-[11px] sm:text-xs text-neutral-500 mt-1 line-clamp-2">{exp.description}</p>
                               
-                              {/* THE MAGIC: Mobile-only Category Badge injected into the description row */}
                               <div className="mt-2 sm:hidden">
                                 {categoryBadge}
                               </div>
