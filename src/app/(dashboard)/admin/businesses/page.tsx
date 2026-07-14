@@ -18,7 +18,8 @@ import ManageBillingDialog from "./ManageBillingDialog";
 import OwnerProfileDialog from "./OwnerProfileDialog"; 
 import Link from "next/link";
 import React from "react";
-import { ChevronDown, Mail } from "lucide-react"; 
+// THE FIX 1: Imported the Phone icon
+import { ChevronDown, Mail, Phone } from "lucide-react"; 
 
 import TablePagination from "@/components/TablePagination";
 
@@ -37,7 +38,6 @@ function renderPlanAndBilling(biz: any) {
   const isCanceled = subStatus === 'canceled';
   const isPastDue = subStatus === 'past_due';
 
-  // THE FIX: Calculate if the trial has expired mathematically
   let isTrialExpired = false;
   let daysLeft = 0;
   
@@ -51,7 +51,6 @@ function renderPlanAndBilling(biz: any) {
     }
   }
 
-  // Dynamic Badging Logic
   let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
   let displayStatus = subStatus.replace('_', ' ');
 
@@ -80,7 +79,6 @@ function renderPlanAndBilling(biz: any) {
         </span>
       </div>
       
-      {/* THE FIX: Distinct UI messages for Active vs Expired Trials */}
       {isTrial && !isTrialExpired && biz.trial_ends_at && (
         <span className="text-[11px] font-medium text-blue-600 mt-1">
           {daysLeft} days left (Ends: {new Date(biz.trial_ends_at).toLocaleDateString()})
@@ -194,9 +192,20 @@ export default async function SuperAdminBusinessesPage(props: {
       const ownerPhone = (portfolio.ownerDetails?.mobile_number || '').toLowerCase();
       const mainName = mainAccount.business_name.toLowerCase();
       
-      if (ownerName.includes(searchStr) || ownerEmail.includes(searchStr) || ownerPhone.includes(searchStr) || mainName.includes(searchStr)) {
+      // THE FIX 2: Added Regex Sanitization for Phone Searching
+      const cleanSearchStr = searchStr.replace(/[\s-]/g, '');
+      const cleanOwnerPhone = ownerPhone.replace(/[\s-]/g, '');
+      
+      if (
+        ownerName.includes(searchStr) || 
+        ownerEmail.includes(searchStr) || 
+        mainName.includes(searchStr) ||
+        ownerPhone.includes(searchStr) ||
+        (cleanSearchStr.length > 0 && cleanOwnerPhone.includes(cleanSearchStr))
+      ) {
         mainMatchesSearch = true;
       }
+
       subAccounts = subAccounts.filter(b => b.business_name.toLowerCase().includes(searchStr));
     } else {
       mainMatchesSearch = true; 
@@ -309,12 +318,29 @@ export default async function SuperAdminBusinessesPage(props: {
                         <div>
                           <div className="flex items-center gap-2"><p className="font-bold text-neutral-900 text-base">{portfolio.mainAccount.business_name}</p></div>
                           <p className="text-[11px] text-neutral-400 mt-0.5 font-mono">ID: {portfolio.mainAccount.id.split('-')[0]} • Reg: {new Date(portfolio.mainAccount.created_at).toLocaleDateString()}</p>
-                          <div className="mt-3 flex items-start gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100 w-max pr-6">
-                            <div className="h-8 w-8 rounded bg-neutral-800 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">{portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}</div>
-                            <div className="flex flex-col justify-center">
-                              <span className="text-xs font-bold text-neutral-900">{portfolio.ownerDetails?.full_name || 'Unknown Owner'}</span>
-                              <span className="text-[10px] text-neutral-500 flex items-center gap-1.5 mt-0.5"><Mail size={10} className="text-neutral-400" /> {portfolio.ownerDetails?.email || 'No email'}</span>
+                          
+                          <div className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-neutral-50 border border-neutral-100 w-max pr-8">
+                            <div className="h-9 w-9 rounded bg-neutral-800 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
+                              {portfolio.ownerDetails?.full_name?.charAt(0)?.toUpperCase() || 'U'}
                             </div>
+                            
+                            {/* THE FIX 3: Rendered the Mobile Number directly below the Email */}
+                            <div className="flex flex-col justify-center gap-1">
+                              <span className="text-sm font-bold text-neutral-900 leading-none">{portfolio.ownerDetails?.full_name || 'Unknown Owner'}</span>
+                              <div className="flex flex-col gap-0.5 mt-0.5">
+                                <span className="text-[10px] text-neutral-500 flex items-center gap-1.5">
+                                  <Mail size={10} className="text-neutral-400 shrink-0" /> 
+                                  <span className="truncate">{portfolio.ownerDetails?.email || 'No email'}</span>
+                                </span>
+                                {portfolio.ownerDetails?.mobile_number && (
+                                  <span className="text-[10px] text-neutral-500 flex items-center gap-1.5">
+                                    <Phone size={10} className="text-neutral-400 shrink-0" /> 
+                                    <span className="font-mono">{portfolio.ownerDetails.mobile_number}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
                           </div>
                         </div>
                       </div>
@@ -362,9 +388,19 @@ export default async function SuperAdminBusinessesPage(props: {
                           <div className="absolute left-[29px] top-[24px] w-[14px] h-[2px] bg-neutral-200 transition-all"></div>
                           <div className="ml-14">
                             <p className="font-bold text-neutral-700 text-sm">{biz.business_name}</p>
-                            <div className="flex flex-col gap-0.5 mt-1">
-                              <p className="text-[10px] text-neutral-500 font-medium">↳ Attached to: <span className="text-neutral-700">{portfolio.ownerDetails?.email || 'Unknown Owner'}</span></p>
-                              <p className="text-[10px] text-neutral-400 font-mono">ID: {biz.id.split('-')[0]} • Reg: {new Date(biz.created_at).toLocaleDateString()}</p>
+                            
+                            {/* THE FIX 4: Applied Phone styling to Sub-Workspaces as well */}
+                            <div className="flex flex-col gap-0.5 mt-1.5">
+                              <p className="text-[10px] text-neutral-500 font-medium flex items-center gap-1">
+                                ↳ Attached to: <span className="text-neutral-700">{portfolio.ownerDetails?.email || 'Unknown Owner'}</span>
+                              </p>
+                              {portfolio.ownerDetails?.mobile_number && (
+                                <p className="text-[10px] text-neutral-500 font-medium flex items-center gap-1 ml-3.5">
+                                  <Phone size={10} className="text-neutral-400 shrink-0" />
+                                  <span className="text-neutral-700 font-mono">{portfolio.ownerDetails.mobile_number}</span>
+                                </p>
+                              )}
+                              <p className="text-[10px] text-neutral-400 font-mono mt-0.5">ID: {biz.id.split('-')[0]} • Reg: {new Date(biz.created_at).toLocaleDateString()}</p>
                             </div>
                           </div>
                         </td>

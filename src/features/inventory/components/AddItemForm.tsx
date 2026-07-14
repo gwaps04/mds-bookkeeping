@@ -3,22 +3,19 @@
 
 import { useState, useRef } from "react";
 import { createItem } from "@/features/inventory/actions";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { PackagePlus, Trash2 } from "lucide-react";
+import SubmitButton from "@/components/SubmitButton";
 
 export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [itemType, setItemType] = useState("SELLABLE_SIMPLE");
-  
-  // THE FIX: Control the Unit of Measure state to handle defaults
   const [unitOfMeasure, setUnitOfMeasure] = useState("");
-  
   const [recipe, setRecipe] = useState<any[]>([]);
-  const [isPending, setIsPending] = useState(false);
 
-  // Dynamic default setter based on item type
   const handleTypeChange = (val: string) => {
     setItemType(val);
     if (val === 'RAW_MATERIAL') setUnitOfMeasure("grams");
@@ -43,26 +40,28 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
   const calculatedCOGS = recipe.reduce((sum, item) => sum + (Number(item.quantity_required) * Number(item.unit_cost)), 0);
 
   const handleSubmit = async (formData: FormData) => {
-    setIsPending(true);
     try {
       await createItem(formData);
       formRef.current?.reset();
       setRecipe([]);
       setItemType("SELLABLE_SIMPLE");
-      setUnitOfMeasure(""); // Reset the select dropdown
+      setUnitOfMeasure(""); 
     } catch (error: any) {
       alert(error.message);
-    } finally {
-      setIsPending(false);
     }
   };
 
   return (
-    <form ref={formRef} action={handleSubmit} className="space-y-4">
-      <div className="space-y-1.5">
-        <Label>Item Classification</Label>
+    <form ref={formRef} action={handleSubmit} className="space-y-5 w-full min-w-0">
+      
+      {/* 1. CLASSIFICATION DROPDOWN */}
+      <div className="space-y-1.5 w-full min-w-0">
+        <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Item Classification</Label>
         <Select name="type" value={itemType} onValueChange={handleTypeChange} required>
-          <SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger>
+          {/* THE FIX: [&>span]:truncate forces the inner text span of Shadcn's trigger to cut off with an ellipsis instead of pushing the container wide */}
+          <SelectTrigger className="w-full focus:ring-neutral-900 font-bold [&>span]:truncate">
+            <SelectValue placeholder="Select type..." />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="SELLABLE_SIMPLE">Sellable Product (Auto-deducted on Invoice)</SelectItem>
             <SelectItem value="SUPPLY">Internal Supply (Manual deduction only)</SelectItem>
@@ -72,21 +71,30 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
         </Select>
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Item Name</Label>
-        <Input name="name" required placeholder={itemType === 'SELLABLE_COMPOSITE' ? "e.g. Vanilla Latte" : "e.g. Coffee Beans"} />
+      {/* 2. ITEM NAME */}
+      <div className="space-y-1.5 w-full min-w-0">
+        <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Item Name</Label>
+        <Input 
+          name="name" 
+          required 
+          placeholder={itemType === 'SELLABLE_COMPOSITE' ? "e.g. Vanilla Latte" : "e.g. Coffee Beans"} 
+          className="w-full focus-visible:ring-neutral-900 font-medium"
+        />
       </div>
       
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>SKU (Optional)</Label>
-          <Input name="sku" placeholder="Barcode / ID" />
+      {/* 3. SKU & UNIT OF MEASURE */}
+      {/* THE FIX: Changed grid-cols-2 to grid-cols-1 sm:grid-cols-2 so it stacks cleanly on 320px screens */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-4 w-full min-w-0">
+        <div className="space-y-1.5 w-full min-w-0">
+          <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">SKU (Optional)</Label>
+          <Input name="sku" placeholder="Barcode / ID" className="w-full focus-visible:ring-neutral-900 font-mono text-sm" />
         </div>
-        <div className="space-y-1.5">
-          <Label>Unit of Measure</Label>
-          {/* THE FIX: Standardized Dropdown for UOM */}
+        <div className="space-y-1.5 w-full min-w-0">
+          <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Unit of Measure</Label>
           <Select name="unit_of_measure" value={unitOfMeasure} onValueChange={setUnitOfMeasure} required>
-            <SelectTrigger><SelectValue placeholder="Select unit..." /></SelectTrigger>
+            <SelectTrigger className="w-full focus:ring-neutral-900 [&>span]:truncate">
+              <SelectValue placeholder="Select unit..." />
+            </SelectTrigger>
             <SelectContent className="max-h-[250px]">
               <SelectGroup>
                 <SelectLabel>Physical Count</SelectLabel>
@@ -118,63 +126,92 @@ export default function AddItemForm({ rawMaterials }: { rawMaterials: any[] }) {
         </div>
       </div>
 
+      {/* 4. RECIPE BUILDER (DYNAMIC CONDITIONAL RENDER) */}
       {itemType === 'SELLABLE_COMPOSITE' && (
-        <div className="p-4 bg-orange-50/50 border border-orange-100 rounded-lg space-y-4">
-          <div className="flex justify-between items-center">
-            <Label className="text-orange-900 font-bold">Recipe Builder</Label>
-            <Button type="button" onClick={addIngredient} variant="outline" size="sm" className="h-7 text-xs bg-white text-orange-600 border-orange-200">+ Add Ingredient</Button>
+        <div className="p-3 sm:p-4 bg-orange-50/50 border border-orange-100 rounded-lg space-y-4 w-full min-w-0">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+            <Label className="text-orange-900 font-bold flex items-center gap-1.5">
+              <PackagePlus size={16} className="text-orange-600" /> Recipe Builder
+            </Label>
+            <Button type="button" onClick={addIngredient} variant="outline" size="sm" className="h-8 text-xs bg-white text-orange-600 border-orange-200 hover:bg-orange-50 shadow-sm w-full sm:w-auto">
+              + Add Ingredient
+            </Button>
           </div>
           
           <input type="hidden" name="recipe" value={JSON.stringify(recipe)} />
           
-          <div className="space-y-3">
+          <div className="space-y-3 w-full min-w-0">
             {recipe.map((ing, index) => (
-              <div key={index} className="flex gap-2 items-start">
-                <div className="flex-1">
-                  <select className="flex h-9 w-full rounded-md border border-neutral-200 bg-white px-3 py-1 text-sm shadow-sm"
-                    value={ing.raw_material_item_id} onChange={(e) => updateIngredient(index, 'raw_material_item_id', e.target.value)} required>
+              <div key={index} className="flex gap-2 items-start w-full min-w-0">
+                <div className="flex-1 min-w-0">
+                  <select 
+                    className="flex h-9 w-full rounded-md border border-neutral-200 bg-white px-3 py-1 text-sm shadow-sm truncate focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                    value={ing.raw_material_item_id} 
+                    onChange={(e) => updateIngredient(index, 'raw_material_item_id', e.target.value)} 
+                    required
+                  >
                     <option value="">Select Raw Material...</option>
                     {rawMaterials.map(rm => <option key={rm.id} value={rm.id}>{rm.name} (per {rm.unit_of_measure})</option>)}
                   </select>
                 </div>
-                <div className="w-20">
-                  <Input type="number" step="0.01" placeholder="Qty" value={ing.quantity_required} onChange={(e) => updateIngredient(index, 'quantity_required', e.target.value)} required className="h-9" />
+                <div className="w-20 sm:w-24 shrink-0">
+                  <Input type="number" step="0.01" min="0.01" placeholder="Qty" value={ing.quantity_required} onChange={(e) => updateIngredient(index, 'quantity_required', e.target.value)} required className="h-9 focus-visible:ring-neutral-900" />
                 </div>
-                <Button type="button" onClick={() => removeIngredient(index)} variant="ghost" className="h-9 px-2 text-red-500">X</Button>
+                <Button type="button" onClick={() => removeIngredient(index)} variant="ghost" className="h-9 px-2 text-red-500 hover:bg-red-50 hover:text-red-700 shrink-0">
+                  <Trash2 size={16} />
+                </Button>
               </div>
             ))}
-            {recipe.length === 0 && <p className="text-xs text-orange-600/70 italic">Add ingredients to build this item.</p>}
+            {recipe.length === 0 && <p className="text-xs text-orange-600/70 italic bg-white p-3 rounded-md border border-orange-100 text-center">No ingredients added yet.</p>}
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>{itemType === 'SELLABLE_COMPOSITE' ? 'Calculated COGS' : 'Unit Cost'}</Label>
+      {/* 5. PRICING & THRESHOLDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-4 w-full min-w-0">
+        <div className="space-y-1.5 w-full min-w-0">
+          <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">
+            {itemType === 'SELLABLE_COMPOSITE' ? 'Calculated COGS' : 'Unit Cost'}
+          </Label>
           {itemType === 'SELLABLE_COMPOSITE' ? (
             <div className="flex h-10 w-full items-center rounded-md border border-neutral-200 bg-neutral-100 px-3 py-2 text-sm text-neutral-500 font-bold">
               {calculatedCOGS.toFixed(2)}
               <input type="hidden" name="unit_cost" value={calculatedCOGS} />
             </div>
           ) : (
-            <Input name="unit_cost" type="number" step="0.01" required placeholder="0.00" />
+            <Input name="unit_cost" type="number" step="0.01" min="0" required placeholder="0.00" className="w-full focus-visible:ring-neutral-900 font-medium" />
           )}
         </div>
         
-        <div className="space-y-1.5">
-          <Label>Selling Price</Label>
-          <Input name="selling_price" type="number" step="0.01" required placeholder="0.00" disabled={itemType === 'SUPPLY' || itemType === 'RAW_MATERIAL'} defaultValue={itemType === 'SUPPLY' || itemType === 'RAW_MATERIAL' ? "0" : ""} />
+        <div className="space-y-1.5 w-full min-w-0">
+          <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Selling Price</Label>
+          <Input 
+            name="selling_price" 
+            type="number" 
+            step="0.01" 
+            min="0" 
+            required 
+            placeholder="0.00" 
+            disabled={itemType === 'SUPPLY' || itemType === 'RAW_MATERIAL'} 
+            defaultValue={itemType === 'SUPPLY' || itemType === 'RAW_MATERIAL' ? "0" : ""} 
+            className="w-full focus-visible:ring-neutral-900 font-medium text-emerald-700 disabled:opacity-50"
+          />
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Reorder Threshold Alert</Label>
-        <Input name="reorder_threshold" type="number" defaultValue="5" required />
+      <div className="space-y-1.5 w-full min-w-0 pb-2">
+        <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Reorder Threshold Alert</Label>
+        <Input name="reorder_threshold" type="number" min="0" defaultValue="5" required className="w-full focus-visible:ring-neutral-900" />
       </div>
 
-      <Button type="submit" disabled={isPending} className="w-full bg-neutral-900 hover:bg-neutral-800 text-white">
-        {isPending ? "Saving..." : "Save Item to Catalog"}
-      </Button>
+      <div className="pt-2 border-t border-neutral-100 w-full min-w-0">
+        <SubmitButton 
+          title="Save Item to Catalog" 
+          loadingTitle="Saving Item..." 
+          className="w-full bg-neutral-900 hover:bg-neutral-800 text-white font-bold h-11 sm:h-10 shadow-sm transition-all" 
+        />
+      </div>
+
     </form>
   );
 }

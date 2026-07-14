@@ -2,6 +2,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+// THE FIX 1: Import the Admin Client to bypass RLS during the onboarding sequence
+import { createAdminClient } from "@/lib/supabase/admin"; 
 import { redirect } from "next/navigation";
 
 // ============================================================================
@@ -19,7 +21,7 @@ export async function login(formData: FormData) {
 }
 
 // ============================================================================
-// 2. SECURE SIGNUP 
+// 2. SECURE SIGNUP (Upgraded with Profile Bridging)
 // ============================================================================
 export async function signup(formData: FormData) {
   const email = formData.get("email") as string;
@@ -29,7 +31,9 @@ export async function signup(formData: FormData) {
   const termsAccepted = formData.get("terms_accepted") === "true";
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({
+  
+  // 1. Create the user in the hidden Auth schema
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -47,6 +51,24 @@ export async function signup(formData: FormData) {
     }
     return { error: error.message };
   }
+
+  // ============================================================================
+  // THE FIX 2: THE AUTH-TO-PUBLIC SCHEMA BRIDGE
+  // ============================================================================
+  // Because the default Supabase Trigger may not copy the new mobile_number column,
+  // we use the Admin Client to forcefully update the public profile immediately.
+  if (data?.user?.id && mobileNumber) {
+    const adminAuthClient = createAdminClient();
+    await adminAuthClient
+      .from("profiles")
+      .update({ 
+        mobile_number: mobileNumber,
+        // We also ensure full_name is perfectly synced just in case!
+        full_name: fullName 
+      })
+      .eq("id", data.user.id);
+  }
+
   redirect("/dashboard");
 }
 
@@ -60,7 +82,7 @@ export async function logout() {
 }
 
 // ============================================================================
-// 4. PASSWORD RECOVERY ENGINE (Generates the Email)
+// 4. PASSWORD RECOVERY ENGINE
 // ============================================================================
 export async function requestPasswordReset(formData: FormData) {
   const email = formData.get("email") as string;
@@ -69,7 +91,6 @@ export async function requestPasswordReset(formData: FormData) {
   const supabase = await createClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-  // IMPORTANT: We now send them to the API callback route first!
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${siteUrl}/auth/callback?next=/update-password`,
   });
@@ -82,13 +103,12 @@ export async function requestPasswordReset(formData: FormData) {
 }
 
 // ============================================================================
-// 5. SECURE PASSWORD UPDATE (Session-Only)
+// 5. SECURE PASSWORD UPDATE
 // ============================================================================
 export async function updatePassword(formData: FormData) {
   const password = formData.get("password") as string;
   const supabase = await createClient();
 
-  // The Callback Route already established our secure session, so we just update!
   const { error } = await supabase.auth.updateUser({ password });
 
   if (error) {

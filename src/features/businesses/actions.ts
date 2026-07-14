@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { logSecurityEvent } from "@/lib/audit"; 
 
 // ============================================================================
-// 1. PROVISION TENANT (Upgraded with Address & Telemetry)
+// 1. PROVISION TENANT (Upgraded with Address, Telemetry & KYC Contact)
 // ============================================================================
 export async function provisionTenant(formData: FormData) {
   const businessName = formData.get("business_name") as string;
@@ -18,6 +18,9 @@ export async function provisionTenant(formData: FormData) {
   const industry = formData.get("industry") as string;
   const employeeCount = formData.get("employee_count") as string;
   const featuresRaw = formData.get("requested_features") as string;
+  
+  // THE FIX: Extract the mobile number from the incoming form payload!
+  const mobileNumber = formData.get("mobile_number") as string; 
   
   // 2. Safely parse the JSON array of checkboxes
   let requestedFeatures: string[] = [];
@@ -52,9 +55,19 @@ export async function provisionTenant(formData: FormData) {
 
   if (bizError) return { error: bizError.message };
 
+  // ============================================================================
+  // THE FIX: Safely construct the Profile Update Payload
+  // ============================================================================
+  const profileUpdatePayload: any = { business_id: business.id };
+
+  // Only attach the mobile_number if it exists to prevent PostgreSQL UNIQUE Constraint crashes
+  if (mobileNumber && mobileNumber.trim() !== "") {
+    profileUpdatePayload.mobile_number = mobileNumber.trim();
+  }
+
   const { error: profileError } = await supabase
     .from("profiles")
-    .update({ business_id: business.id })
+    .update(profileUpdatePayload)
     .eq("id", user.id);
 
   if (profileError) return { error: profileError.message };
@@ -98,7 +111,14 @@ export async function approveBusiness(formData: FormData) {
       status: "active",
       subscription_status: "trial",
       subscription_tier: tier,
-      trial_ends_at: trialEndsAt.toISOString()
+      trial_ends_at: trialEndsAt.toISOString(),
+      
+      // SaaS Resource Gates: Defaulted to OFF to protect infrastructure costs
+      allow_receipt_uploads: false,  
+      has_inventory_access: false,   
+      has_payroll_access: false,     
+      has_planner_access: false,     
+      has_reports_access: false      
     })
     .eq("id", businessId);
 
@@ -202,10 +222,7 @@ export async function createOrganization(formData: FormData) {
     return { error: `Plan Limit Reached: You are only permitted to manage ${limit} organization(s). Please contact a Super Admin to upgrade your account tier.` };
   }
 
-  // ==========================================================================
   // 5. SMART STATUS INHERITANCE
-  // ==========================================================================
-  // Check if the owner has ANY active (paid) business in their portfolio
   const activeBiz = existingBusinesses.find(b => b.subscription_status === 'active');
   
   let initialStatus = "trial";
@@ -223,7 +240,6 @@ export async function createOrganization(formData: FormData) {
     trialEndsAt = trialDate.toISOString();
   }
 
-  // 6. Provision the new workspace instantly
   const { data: newBusiness, error: bizError } = await supabase
     .from("businesses")
     .insert({
@@ -233,7 +249,14 @@ export async function createOrganization(formData: FormData) {
       status: "active",
       subscription_status: initialStatus,
       subscription_tier: initialTier,
-      trial_ends_at: trialEndsAt 
+      trial_ends_at: trialEndsAt,
+      
+      // Explicitly disable premium modules so the Sub-Org does not bypass Super Admin locks
+      allow_receipt_uploads: false,  
+      has_inventory_access: false,   
+      has_payroll_access: false,     
+      has_planner_access: false,     
+      has_reports_access: false      
     })
     .select("id")
     .single();

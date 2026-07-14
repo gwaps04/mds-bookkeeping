@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { User, Mail, Phone, Calendar, Shield, Building2, MapPin, X } from "lucide-react";
+import { User, Mail, Phone, Calendar, Shield, Building2, MapPin, X, AlertCircle } from "lucide-react";
 
 export default function OwnerProfileDialog({ owner, businesses }: { owner: any, businesses: any[] }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -53,24 +53,32 @@ export default function OwnerProfileDialog({ owner, businesses }: { owner: any, 
                 <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2">Identity & Contact</h4>
                 
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-neutral-100 bg-white shadow-sm">
-                  <div className="p-2 bg-blue-50 text-blue-600 rounded-md"><Mail size={16} /></div>
-                  <div>
+                  <div className="p-2 bg-blue-50 text-blue-600 rounded-md shrink-0"><Mail size={16} /></div>
+                  <div className="min-w-0">
                     <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Email Address</p>
-                    <p className="text-sm font-medium text-neutral-900">{owner.email || 'Not provided'}</p>
+                    <p className="text-sm font-medium text-neutral-900 truncate">{owner.email || 'Not provided'}</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-neutral-100 bg-white shadow-sm">
-                  <div className="p-2 bg-green-50 text-green-600 rounded-md"><Phone size={16} /></div>
-                  <div>
+                  <div className={`p-2 rounded-md shrink-0 ${owner.mobile_number ? 'bg-green-50 text-green-600' : 'bg-neutral-100 text-neutral-400'}`}>
+                    <Phone size={16} />
+                  </div>
+                  <div className="min-w-0">
                     <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Mobile Number</p>
-                    <p className="text-sm font-medium text-neutral-900">{owner.mobile_number || 'Not provided'}</p>
+                    {owner.mobile_number ? (
+                      <p className="text-sm font-medium text-neutral-900 font-mono truncate">{owner.mobile_number}</p>
+                    ) : (
+                      <p className="text-xs font-medium text-amber-600 flex items-center gap-1 mt-0.5">
+                        <AlertCircle size={12} /> Pending Onboarding
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-neutral-100 bg-white shadow-sm">
-                  <div className="p-2 bg-purple-50 text-purple-600 rounded-md"><Calendar size={16} /></div>
-                  <div>
+                  <div className="p-2 bg-purple-50 text-purple-600 rounded-md shrink-0"><Calendar size={16} /></div>
+                  <div className="min-w-0">
                     <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Platform Join Date</p>
                     <p className="text-sm font-medium text-neutral-900">{joinDate}</p>
                   </div>
@@ -84,15 +92,15 @@ export default function OwnerProfileDialog({ owner, businesses }: { owner: any, 
                 {businesses.map((biz, index) => (
                   <div key={biz.id} className="p-3 rounded-lg border border-neutral-200 bg-neutral-50/50 space-y-2">
                     <div className="flex items-center gap-2">
-                      <Building2 size={14} className="text-neutral-500" />
-                      <span className="text-sm font-bold text-neutral-900">{biz.business_name}</span>
+                      <Building2 size={14} className="text-neutral-500 shrink-0" />
+                      <span className="text-sm font-bold text-neutral-900 truncate">{biz.business_name}</span>
                       {index === 0 && (
-                        <span className="ml-auto px-1.5 py-0.5 bg-neutral-200 text-neutral-600 rounded text-[9px] font-bold uppercase tracking-wider">Main</span>
+                        <span className="ml-auto px-1.5 py-0.5 bg-neutral-200 text-neutral-600 rounded text-[9px] font-bold uppercase tracking-wider shrink-0">Main</span>
                       )}
                     </div>
                     <div className="flex items-start gap-2 text-neutral-600 pl-1">
                       <MapPin size={12} className="shrink-0 mt-0.5 text-neutral-400" />
-                      <span className="text-xs leading-relaxed">{biz.address || 'No commercial address registered.'}</span>
+                      <span className="text-xs leading-relaxed break-words">{biz.address || 'No commercial address registered.'}</span>
                     </div>
                   </div>
                 ))}
