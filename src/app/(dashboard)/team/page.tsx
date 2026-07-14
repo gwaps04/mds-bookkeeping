@@ -8,6 +8,9 @@ export default async function TeamPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // ============================================================================
+  // 1. GATEKEEPER & STATE HYDRATION (Restored Trial Status)
+  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
     .select(`
@@ -17,7 +20,8 @@ export default async function TeamPage() {
         max_staff_limit, 
         has_inventory_access, 
         has_payroll_access,
-        is_tax_registered
+        is_tax_registered,
+        subscription_status
       )
     `)
     .eq("id", user?.id)
@@ -30,16 +34,15 @@ export default async function TeamPage() {
   const businessId = profile?.business_id;
   const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
 
-  const maxLimit = bizData?.max_staff_limit ?? 1;
-  const allowedLimit = maxLimit;
+  const allowedLimit = bizData?.max_staff_limit ?? 1;
   
-  // ============================================================================
-  // THE FIX 1: Extract boolean states for the UI Forms
-  // ============================================================================
+  // Extract Boolean States for the UI
+  const isTrial = bizData?.subscription_status === 'trial';
   const hasInventory = bizData?.has_inventory_access === true;
   const hasPayroll = bizData?.has_payroll_access === true;
   const hasTaxes = bizData?.is_tax_registered === true;
 
+  // Fetch Team Members
   const { data: teamMembers } = await supabase
     .from("profiles")
     .select("id, full_name, email, role, created_at, can_access_inventory, can_access_expenses, can_access_taxes, can_access_payroll")
@@ -50,15 +53,18 @@ export default async function TeamPage() {
   const hasRemainingQuota = staffCount < allowedLimit;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
+    // THE FIX: Added w-full min-w-0 to prevent horizontal flex-blowout
+    <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 w-full min-w-0 overflow-x-hidden">
       
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-900 text-balance">Team Management</h2>
+      {/* HEADER SECTION */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 w-full min-w-0">
+        <div className="w-full min-w-0 flex-1">
+          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-900 text-balance leading-tight">Team Management</h2>
           <p className="text-sm sm:text-base text-neutral-500 mt-1">Onboard staff and manage their access to your ledger.</p>
         </div>
         
-        <div className={`px-4 py-2 rounded-full border text-xs sm:text-sm font-bold shadow-sm self-start md:self-auto ${
+        {/* Responsive Badge */}
+        <div className={`px-4 py-2 rounded-full border text-xs sm:text-sm font-bold shadow-sm shrink-0 w-max ${
           hasRemainingQuota 
             ? 'bg-blue-50 border-blue-200 text-blue-700' 
             : 'bg-amber-50 border-amber-200 text-amber-700'
@@ -67,10 +73,13 @@ export default async function TeamPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 md:gap-8 md:grid-cols-3 items-start">
+      {/* THE FIX: Changed md:grid-cols-3 to lg:grid-cols-3 to prevent tablet crush */}
+      <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
-        <div className="md:col-span-1">
-          <Card className="shadow-sm border-neutral-200 md:sticky md:top-8">
+        {/* LEFT COLUMN: INVITE STAFF FORM */}
+        <div className="lg:col-span-1 w-full min-w-0">
+          {/* THE FIX: Sticky only applies at LG breakpoint now */}
+          <Card className="shadow-sm border-neutral-200 lg:sticky lg:top-8 bg-white w-full min-w-0">
             <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 pb-4">
               <CardTitle className="text-lg font-bold">Create Staff Account</CardTitle>
               <CardDescription>Instantly provision an account for a new employee.</CardDescription>
@@ -86,26 +95,30 @@ export default async function TeamPage() {
                   hasInventory={hasInventory} 
                   hasPayroll={hasPayroll} 
                   hasTaxes={hasTaxes} 
+                  isTrial={isTrial}
                 />
               )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="md:col-span-2">
-          <Card className="shadow-sm border-neutral-200 flex flex-col overflow-hidden">
-            <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4">
+        {/* RIGHT COLUMN: ACTIVE TEAM DIRECTORY */}
+        <div className="lg:col-span-2 w-full min-w-0">
+          <Card className="shadow-sm border-neutral-200 flex flex-col overflow-hidden bg-white w-full min-w-0">
+            <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 shrink-0">
               <CardTitle className="text-lg font-bold">Active Roster</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap min-w-[600px]">
+            
+            {/* THE FIX: Controlled overflow to ensure the table swipes on mobile but never breaks the card */}
+            <CardContent className="p-0 flex-1 w-full overflow-hidden">
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-left text-sm table-auto whitespace-nowrap min-w-[600px]">
                   <thead className="bg-white border-b border-neutral-200">
                     <tr>
-                      <th className="px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Name / Email</th>
-                      <th className="px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Role</th>
-                      <th className="px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Joined</th>
-                      <th className="px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] text-right">Actions</th>
+                      <th className="px-4 sm:px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Name / Email</th>
+                      <th className="px-4 sm:px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Role</th>
+                      <th className="px-4 sm:px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px]">Joined</th>
+                      <th className="px-4 sm:px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100 bg-white">
@@ -118,9 +131,10 @@ export default async function TeamPage() {
                     ) : (
                       teamMembers.map((member) => (
                         <tr key={member.id} className="hover:bg-neutral-50/60 transition-colors group">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center space-x-3">
-                              <div className="h-9 w-9 rounded-full bg-neutral-900 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                          
+                          <td className="px-4 sm:px-6 py-4 align-middle">
+                            <div className="flex items-center space-x-3 w-full max-w-[200px] sm:max-w-xs">
+                              <div className="h-9 w-9 rounded-full bg-neutral-900 text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
                                 {(member.full_name || member.email || 'U').charAt(0).toUpperCase()}
                               </div>
                               <div className="flex flex-col min-w-0">
@@ -129,7 +143,8 @@ export default async function TeamPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4">
+                          
+                          <td className="px-4 sm:px-6 py-4 align-middle">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shadow-sm border ${
                               member.role === 'business_owner' 
                                 ? 'bg-purple-50 text-purple-700 border-purple-200' 
@@ -138,26 +153,28 @@ export default async function TeamPage() {
                               {member.role === 'business_owner' ? 'Owner' : 'Staff'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-neutral-500 text-xs font-medium">
+                          
+                          <td className="px-4 sm:px-6 py-4 text-neutral-500 text-xs font-medium align-middle">
                             {new Date(member.created_at).toLocaleDateString()}
                           </td>
                           
-                          <td className="px-6 py-4 text-right">
+                          <td className="px-4 sm:px-6 py-4 text-right align-middle">
                             <div className="flex items-center justify-end gap-2">
                               {member.role === 'staff' && (
                                 <>
-                                  {/* THE FIX 2: Pass the boolean flags into the Edit Modal */}
                                   <EditPermissionsButton 
                                     staff={member as any} 
                                     hasInventory={hasInventory} 
                                     hasPayroll={hasPayroll} 
                                     hasTaxes={hasTaxes} 
+                                    isTrial={isTrial}
                                   />
                                   <ResetPasswordButton userId={member.id} email={member.email} />
                                 </>
                               )}
                             </div>
                           </td>
+
                         </tr>
                       ))
                     )}

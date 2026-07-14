@@ -6,17 +6,32 @@ import { provisionStaffAccount, resetStaffPassword, updateStaffPermissions } fro
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, CheckCircle2, KeyRound, AlertTriangle, ShieldCheck, Calculator, Package, Wallet, Users, Settings2, X, Landmark, Lock } from "lucide-react";
+import { Copy, CheckCircle2, KeyRound, AlertTriangle, ShieldCheck, Calculator, Package, Wallet, Users, Settings2, X, Landmark, Lock, Info } from "lucide-react";
 import SubmitButton from "@/components/SubmitButton";
 
 // ============================================================================
 // 1. PROVISION STAFF FORM 
 // ============================================================================
-export function ProvisionStaffForm({ hasInventory, hasPayroll, hasTaxes }: { hasInventory: boolean, hasPayroll: boolean, hasTaxes: boolean }) {
+// THE FIX: Explicitly declared the isTrial prop in the TypeScript Interface
+export function ProvisionStaffForm({ 
+  hasInventory, 
+  hasPayroll, 
+  hasTaxes, 
+  isTrial 
+}: { 
+  hasInventory: boolean;
+  hasPayroll: boolean; 
+  hasTaxes: boolean; 
+  isTrial: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const [credentials, setCredentials] = useState<{ email: string, pass: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const isInventoryLocked = isTrial || !hasInventory;
+  const isPayrollLocked = isTrial || !hasPayroll;
+  const isTaxesLocked = !hasTaxes;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -106,52 +121,67 @@ export function ProvisionStaffForm({ hasInventory, hasPayroll, hasTaxes }: { has
           Module Access Control
         </Label>
         
-        {(!hasInventory || !hasPayroll) && (
-          <p className="text-[10px] sm:text-[11px] text-neutral-500 bg-neutral-50 border border-neutral-200 p-2.5 rounded flex items-start gap-1.5">
+        {isTrial ? (
+          <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-start gap-2.5 text-indigo-800 shadow-sm">
+            <Info size={16} className="shrink-0 mt-0.5 text-indigo-600" />
+            <p className="text-[10px] sm:text-[11px] leading-relaxed">
+              <strong>Trial Status Notice:</strong> HR & Payroll and Inventory are Premium modules accessible only on Paid Subscriptions. They will not work while the workspace is in Trial mode.
+            </p>
+          </div>
+        ) : (!hasInventory || !hasPayroll) ? (
+          <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg flex items-start gap-2 text-neutral-500 shadow-sm">
             <Lock size={14} className="shrink-0 mt-0.5 text-neutral-400" />
-            <span>Some premium modules are currently disabled for your business. Upgrade your plan to grant staff access to them.</span>
-          </p>
-        )}
+            <p className="text-[10px] sm:text-[11px] leading-relaxed">
+              Some Premium modules are disabled for your business. Upgrade your plan to grant staff access to them.
+            </p>
+          </div>
+        ) : null}
         
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="flex items-start gap-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg opacity-80 select-none">
-            <input type="checkbox" checked disabled className="mt-1 w-4 h-4 text-blue-600 rounded border-neutral-300" />
+          
+          <div className="flex items-center gap-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg opacity-80 select-none">
+            <input type="checkbox" checked disabled className="w-4 h-4 text-blue-600 rounded border-neutral-300" />
             <div className="flex flex-col">
               <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Calculator size={14} className="text-neutral-500" /> Invoicing & Cash</span>
             </div>
           </div>
 
-          <Label className={`flex items-start gap-3 p-3 border rounded-lg transition-colors shadow-sm ${hasInventory ? 'border-neutral-200 cursor-pointer hover:bg-blue-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-            <input type="checkbox" name="can_access_inventory" defaultChecked={hasInventory} disabled={!hasInventory} className="mt-1 w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500 disabled:opacity-50" />
+          <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${!isInventoryLocked ? 'border-neutral-200 cursor-pointer hover:bg-blue-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+            <input type="checkbox" name="can_access_inventory" defaultChecked={false} disabled={isInventoryLocked} className="w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500 disabled:opacity-50" />
             <div className="flex flex-col">
-              <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Package size={14} className={hasInventory ? "text-amber-600" : "text-neutral-500"} /> Inventory</span>
+              <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Package size={14} className={!isInventoryLocked ? "text-amber-600" : "text-neutral-500"} /> Inventory</span>
             </div>
           </Label>
 
-          <Label className="flex items-start gap-3 p-3 border border-neutral-200 rounded-lg cursor-pointer hover:bg-blue-50/50 transition-colors bg-white shadow-sm">
-            <input type="checkbox" name="can_access_expenses" className="mt-1 w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500" />
+          <Label className="flex items-center gap-3 p-3 border border-neutral-200 rounded-lg cursor-pointer hover:bg-blue-50/50 transition-colors bg-white shadow-sm">
+            <input type="checkbox" name="can_access_expenses" defaultChecked={false} className="w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500" />
             <div className="flex flex-col">
               <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Wallet size={14} className="text-rose-600" /> Expenses</span>
             </div>
           </Label>
 
-          <Label className={`flex items-start gap-3 p-3 border rounded-lg transition-colors shadow-sm ${hasTaxes ? 'border-indigo-200 cursor-pointer hover:bg-indigo-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-            <input type="checkbox" name="can_access_taxes" disabled={!hasTaxes} className="mt-1 w-4 h-4 text-indigo-600 rounded border-indigo-300 focus:ring-indigo-500 disabled:opacity-50" />
+          <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${!isTaxesLocked ? 'border-indigo-200 cursor-pointer hover:bg-indigo-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+            <input type="checkbox" name="can_access_taxes" disabled={isTaxesLocked} className="w-4 h-4 text-indigo-600 rounded border-indigo-300 focus:ring-indigo-500 disabled:opacity-50" />
             <div className="flex flex-col">
-              <span className="font-bold text-indigo-900 text-sm flex items-center gap-1.5"><Landmark size={14} className={hasTaxes ? "text-indigo-600" : "text-neutral-500"} /> BIR Taxes</span>
-              {!hasTaxes && <span className="text-[9px] text-neutral-500 mt-1">Enable in Business Settings</span>}
+              <span className="font-bold text-indigo-900 text-sm flex items-center gap-1.5"><Landmark size={14} className={!isTaxesLocked ? "text-indigo-600" : "text-neutral-500"} /> BIR Taxes</span>
             </div>
           </Label>
 
-          <Label className={`flex items-start gap-3 p-3 border rounded-lg transition-colors shadow-sm sm:col-span-2 ${hasPayroll ? 'border-red-200 cursor-pointer hover:bg-red-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-            <input type="checkbox" name="can_access_payroll" disabled={!hasPayroll} className="mt-1 w-4 h-4 text-red-600 rounded border-red-300 focus:ring-red-500 disabled:opacity-50" />
+          <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm sm:col-span-2 ${!isPayrollLocked ? 'border-red-200 cursor-pointer hover:bg-red-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+            <input type="checkbox" name="can_access_payroll" disabled={isPayrollLocked} className="w-4 h-4 text-red-600 rounded border-red-300 focus:ring-red-500 disabled:opacity-50" />
             <div className="flex flex-col">
-              <span className="font-bold text-red-900 text-sm flex items-center gap-1.5"><Users size={14} className={hasPayroll ? "text-red-600" : "text-neutral-500"} /> HR & Payroll</span>
+              <span className="font-bold text-red-900 text-sm flex items-center gap-1.5"><Users size={14} className={!isPayrollLocked ? "text-red-600" : "text-neutral-500"} /> HR & Payroll</span>
             </div>
           </Label>
+
         </div>
       </div>
       
+      <div className="p-3 bg-blue-50 text-blue-800 text-xs rounded-md border border-blue-100 leading-relaxed flex items-start gap-2">
+        <ShieldCheck size={16} className="shrink-0 mt-0.5 text-blue-600" />
+        <p>A highly secure, randomized password will be generated automatically. You will be able to copy it on the next screen.</p>
+      </div>
+
       <div className="pt-2">
         <Button type="submit" disabled={loading} className="w-full bg-blue-700 text-white hover:bg-blue-800 font-bold transition-all shadow-sm h-11 md:h-10">
           {loading ? "Provisioning..." : "Provision Account & Permissions"}
@@ -248,16 +278,28 @@ export function ResetPasswordButton({ userId, email }: { userId: string, email: 
 }
 
 // ============================================================================
-// 3. EDIT PERMISSIONS BUTTON (With SaaS Gatekeeping UI)
+// 3. EDIT PERMISSIONS BUTTON
 // ============================================================================
+// THE FIX: Explicitly declared the isTrial prop in the TypeScript Interface
 export function EditPermissionsButton({ 
-  staff, hasInventory, hasPayroll, hasTaxes
+  staff, 
+  hasInventory, 
+  hasPayroll, 
+  hasTaxes, 
+  isTrial
 }: { 
-  staff: { id: string, full_name: string, email: string, can_access_inventory: boolean, can_access_expenses: boolean, can_access_taxes: boolean, can_access_payroll: boolean },
-  hasInventory: boolean, hasPayroll: boolean, hasTaxes: boolean
+  staff: { id: string, full_name: string, email: string, can_access_inventory: boolean, can_access_expenses: boolean, can_access_taxes: boolean, can_access_payroll: boolean };
+  hasInventory: boolean; 
+  hasPayroll: boolean; 
+  hasTaxes: boolean; 
+  isTrial: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isInventoryLocked = isTrial || !hasInventory;
+  const isPayrollLocked = isTrial || !hasPayroll;
+  const isTaxesLocked = !hasTaxes;
 
   async function handleUpdate(formData: FormData) {
     setError(null);
@@ -303,17 +345,24 @@ export function EditPermissionsButton({
               <div className="space-y-3">
                 <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Module Access Control</Label>
                 
-                {/* THE FIX: Added Warning Banner if Premium Modules are locked */}
-                {(!hasInventory || !hasPayroll) && (
-                  <p className="text-[10px] sm:text-[11px] text-neutral-500 bg-neutral-50 border border-neutral-200 p-2.5 rounded flex items-start gap-1.5">
+                {isTrial ? (
+                  <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-start gap-2.5 text-indigo-800 shadow-sm">
+                    <Info size={16} className="shrink-0 mt-0.5 text-indigo-600" />
+                    <p className="text-[10px] sm:text-[11px] leading-relaxed">
+                      <strong>Trial Status Notice:</strong> HR & Payroll and Inventory are Premium modules accessible only on Paid Subscriptions. They will not work while the workspace is in Trial mode.
+                    </p>
+                  </div>
+                ) : (!hasInventory || !hasPayroll) ? (
+                  <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded-lg flex items-start gap-2 text-neutral-500 shadow-sm">
                     <Lock size={14} className="shrink-0 mt-0.5 text-neutral-400" />
-                    <span>Premium modules are disabled for the business. They cannot be granted to staff.</span>
-                  </p>
-                )}
+                    <p className="text-[10px] sm:text-[11px] leading-relaxed">
+                      Some Premium modules are disabled for your business. Upgrade your plan to grant staff access to them.
+                    </p>
+                  </div>
+                ) : null}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   
-                  {/* Base Access (Always On) */}
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg opacity-80 select-none">
                     <input type="checkbox" checked disabled className="w-4 h-4 text-blue-600 rounded border-neutral-300" />
                     <div className="flex flex-col">
@@ -321,11 +370,10 @@ export function EditPermissionsButton({
                     </div>
                   </div>
 
-                  {/* THE FIX: Dynamic Grayscale/Disabled states applied below */}
-                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${hasInventory ? 'border-neutral-200 cursor-pointer hover:bg-blue-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-                    <input type="checkbox" name="can_access_inventory" defaultChecked={staff.can_access_inventory} disabled={!hasInventory} className="w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500 disabled:opacity-50" />
+                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${!isInventoryLocked ? 'border-neutral-200 cursor-pointer hover:bg-blue-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+                    <input type="checkbox" name="can_access_inventory" defaultChecked={staff.can_access_inventory} disabled={isInventoryLocked} className="w-4 h-4 text-blue-600 rounded border-neutral-300 focus:ring-blue-500 disabled:opacity-50" />
                     <div className="flex flex-col">
-                      <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Package size={14} className={hasInventory ? "text-amber-600" : "text-neutral-500"} /> Inventory</span>
+                      <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5"><Package size={14} className={!isInventoryLocked ? "text-amber-600" : "text-neutral-500"} /> Inventory</span>
                     </div>
                   </Label>
 
@@ -336,17 +384,17 @@ export function EditPermissionsButton({
                     </div>
                   </Label>
 
-                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${hasTaxes ? 'border-indigo-200 cursor-pointer hover:bg-indigo-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-                    <input type="checkbox" name="can_access_taxes" defaultChecked={staff.can_access_taxes} disabled={!hasTaxes} className="w-4 h-4 text-indigo-600 rounded border-indigo-300 focus:ring-indigo-500 disabled:opacity-50" />
+                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm ${!isTaxesLocked ? 'border-indigo-200 cursor-pointer hover:bg-indigo-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+                    <input type="checkbox" name="can_access_taxes" defaultChecked={staff.can_access_taxes} disabled={isTaxesLocked} className="w-4 h-4 text-indigo-600 rounded border-indigo-300 focus:ring-indigo-500 disabled:opacity-50" />
                     <div className="flex flex-col">
-                      <span className="font-bold text-indigo-900 text-sm flex items-center gap-1.5"><Landmark size={14} className={hasTaxes ? "text-indigo-600" : "text-neutral-500"} /> BIR Taxes</span>
+                      <span className="font-bold text-indigo-900 text-sm flex items-center gap-1.5"><Landmark size={14} className={!isTaxesLocked ? "text-indigo-600" : "text-neutral-500"} /> BIR Taxes</span>
                     </div>
                   </Label>
 
-                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm sm:col-span-2 ${hasPayroll ? 'border-red-200 cursor-pointer hover:bg-red-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
-                    <input type="checkbox" name="can_access_payroll" defaultChecked={staff.can_access_payroll} disabled={!hasPayroll} className="w-4 h-4 text-red-600 rounded border-red-300 focus:ring-red-500 disabled:opacity-50" />
+                  <Label className={`flex items-center gap-3 p-3 border rounded-lg transition-colors shadow-sm sm:col-span-2 ${!isPayrollLocked ? 'border-red-200 cursor-pointer hover:bg-red-50/50 bg-white' : 'border-neutral-200 bg-neutral-50 opacity-60 grayscale cursor-not-allowed'}`}>
+                    <input type="checkbox" name="can_access_payroll" defaultChecked={staff.can_access_payroll} disabled={isPayrollLocked} className="w-4 h-4 text-red-600 rounded border-red-300 focus:ring-red-500 disabled:opacity-50" />
                     <div className="flex flex-col">
-                      <span className="font-bold text-red-900 text-sm flex items-center gap-1.5"><Users size={14} className={hasPayroll ? "text-red-600" : "text-neutral-500"} /> HR & Payroll</span>
+                      <span className="font-bold text-red-900 text-sm flex items-center gap-1.5"><Users size={14} className={!isPayrollLocked ? "text-red-600" : "text-neutral-500"} /> HR & Payroll</span>
                     </div>
                   </Label>
 
