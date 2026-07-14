@@ -10,7 +10,16 @@ export default async function TeamPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("business_id, role, businesses(max_staff_limit)")
+    .select(`
+      business_id, 
+      role, 
+      businesses(
+        max_staff_limit, 
+        has_inventory_access, 
+        has_payroll_access,
+        is_tax_registered
+      )
+    `)
     .eq("id", user?.id)
     .single();
 
@@ -19,14 +28,18 @@ export default async function TeamPage() {
   }
 
   const businessId = profile?.business_id;
+  const bizData = Array.isArray(profile?.businesses) ? profile?.businesses[0] : profile?.businesses;
 
-  const maxLimit = Array.isArray(profile?.businesses) 
-    ? profile?.businesses[0]?.max_staff_limit 
-    : (profile?.businesses as any)?.max_staff_limit;
+  const maxLimit = bizData?.max_staff_limit ?? 1;
+  const allowedLimit = maxLimit;
   
-  const allowedLimit = maxLimit ?? 1;
+  // ============================================================================
+  // THE FIX 1: Extract boolean states for the UI Forms
+  // ============================================================================
+  const hasInventory = bizData?.has_inventory_access === true;
+  const hasPayroll = bizData?.has_payroll_access === true;
+  const hasTaxes = bizData?.is_tax_registered === true;
 
-  // THE FIX: Fetch all active team members AND their 4-pillar permission flags
   const { data: teamMembers } = await supabase
     .from("profiles")
     .select("id, full_name, email, role, created_at, can_access_inventory, can_access_expenses, can_access_taxes, can_access_payroll")
@@ -69,7 +82,11 @@ export default async function TeamPage() {
                   <p className="mt-1 leading-relaxed text-xs">You are currently limited to {allowedLimit} staff member(s). Please remove an existing member or contact a Super Admin to upgrade.</p>
                 </div>
               ) : (
-                <ProvisionStaffForm />
+                <ProvisionStaffForm 
+                  hasInventory={hasInventory} 
+                  hasPayroll={hasPayroll} 
+                  hasTaxes={hasTaxes} 
+                />
               )}
             </CardContent>
           </Card>
@@ -129,7 +146,13 @@ export default async function TeamPage() {
                             <div className="flex items-center justify-end gap-2">
                               {member.role === 'staff' && (
                                 <>
-                                  <EditPermissionsButton staff={member as any} />
+                                  {/* THE FIX 2: Pass the boolean flags into the Edit Modal */}
+                                  <EditPermissionsButton 
+                                    staff={member as any} 
+                                    hasInventory={hasInventory} 
+                                    hasPayroll={hasPayroll} 
+                                    hasTaxes={hasTaxes} 
+                                  />
                                   <ResetPasswordButton userId={member.id} email={member.email} />
                                 </>
                               )}

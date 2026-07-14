@@ -20,7 +20,6 @@ import Link from "next/link";
 import React from "react";
 import { ChevronDown, Mail } from "lucide-react"; 
 
-// THE FIX 1: Import Universal Pagination Component
 import TablePagination from "@/components/TablePagination";
 
 // ============================================================================
@@ -38,8 +37,34 @@ function renderPlanAndBilling(biz: any) {
   const isCanceled = subStatus === 'canceled';
   const isPastDue = subStatus === 'past_due';
 
+  // THE FIX: Calculate if the trial has expired mathematically
+  let isTrialExpired = false;
+  let daysLeft = 0;
+  
+  if (isTrial && biz.trial_ends_at) {
+    const now = new Date();
+    const trialEnd = new Date(biz.trial_ends_at);
+    daysLeft = Math.ceil((trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysLeft <= 0) {
+      isTrialExpired = true;
+    }
+  }
+
+  // Dynamic Badging Logic
   let badgeColor = "bg-neutral-100 text-neutral-700 border-neutral-200";
-  if (isTrial) badgeColor = "bg-blue-50 text-blue-700 border-blue-200";
+  let displayStatus = subStatus.replace('_', ' ');
+
+  if (isTrial) {
+    if (isTrialExpired) {
+      badgeColor = "bg-red-50 text-red-700 border-red-200";
+      displayStatus = "trial expired";
+    } else {
+      badgeColor = "bg-blue-50 text-blue-700 border-blue-200";
+      displayStatus = "in trial";
+    }
+  }
+  
   if (isActive) badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200";
   if (isPastDue) badgeColor = "bg-amber-50 text-amber-700 border-amber-200";
   if (isSuspended || isCanceled) badgeColor = "bg-red-50 text-red-700 border-red-200";
@@ -51,14 +76,25 @@ function renderPlanAndBilling(biz: any) {
           {biz.subscription_tier || 'ESSENTIAL'}
         </span>
         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${badgeColor}`}>
-          {subStatus}
+          {displayStatus}
         </span>
       </div>
-      {isTrial && biz.trial_ends_at && (
-        <span className="text-[11px] font-medium text-blue-600 mt-1">Expires: {new Date(biz.trial_ends_at).toLocaleDateString()}</span>
+      
+      {/* THE FIX: Distinct UI messages for Active vs Expired Trials */}
+      {isTrial && !isTrialExpired && biz.trial_ends_at && (
+        <span className="text-[11px] font-medium text-blue-600 mt-1">
+          {daysLeft} days left (Ends: {new Date(biz.trial_ends_at).toLocaleDateString()})
+        </span>
       )}
+      
+      {isTrial && isTrialExpired && biz.trial_ends_at && (
+        <span className="text-[11px] font-bold text-red-600 mt-1">
+          Ended on {new Date(biz.trial_ends_at).toLocaleDateString()}
+        </span>
+      )}
+
       {isActive && <span className="text-[11px] font-medium text-emerald-600 mt-1">Good Standing</span>}
-      {(isSuspended || isCanceled || isPastDue) && <span className="text-[11px] font-medium text-red-600 mt-1 animate-pulse">Account Locked</span>}
+      {(isSuspended || isCanceled || isPastDue) && <span className="text-[11px] font-bold text-red-600 mt-1 animate-pulse">Account Locked</span>}
     </div>
   );
 }
@@ -75,7 +111,6 @@ function renderSystemStatus(biz: any) {
 }
 
 export default async function SuperAdminBusinessesPage(props: { 
-  // THE FIX 2: Added "page" to the Search Params
   searchParams: Promise<{ search?: string, tier?: string, billing?: string, status?: string, page?: string }> 
 }) {
   const params = await props.searchParams;
@@ -176,9 +211,6 @@ export default async function SuperAdminBusinessesPage(props: {
     return Math.max(...datesB) - Math.max(...datesA);
   });
 
-  // ============================================================================
-  // THE FIX 3: IN-MEMORY SERVER SLICE FOR HIERARCHICAL PAGINATION
-  // ============================================================================
   const totalItems = processedPortfolios.length;
   const paginatedPortfolios = processedPortfolios.slice(startIndex, endIndex);
 
@@ -193,7 +225,6 @@ export default async function SuperAdminBusinessesPage(props: {
         <CardContent className="p-4 md:p-5">
           <form method="GET" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
             
-            {/* THE FIX 4: Reset Page to 1 when a new search/filter is executed! */}
             <input type="hidden" name="page" value="1" />
             
             <div className="lg:col-span-2 space-y-1.5">
@@ -239,7 +270,6 @@ export default async function SuperAdminBusinessesPage(props: {
         </CardContent>
       </Card>
 
-      {/* THE FIX 5: Layout adjust for Pagination placement */}
       <Card className="shadow-sm border-neutral-200 overflow-hidden flex flex-col bg-white">
         <CardHeader className="bg-neutral-50/50 border-b border-neutral-200 py-4 shrink-0">
           <CardTitle className="text-lg">Workspace Management</CardTitle>
@@ -368,7 +398,6 @@ export default async function SuperAdminBusinessesPage(props: {
           </table>
         </div>
         
-        {/* THE FIX 6: Render the Universal Pagination UI */}
         <TablePagination 
           totalItems={totalItems} 
           itemsPerPage={ITEMS_PER_PAGE} 
