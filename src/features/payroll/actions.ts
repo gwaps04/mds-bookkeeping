@@ -7,14 +7,15 @@ import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit";
 import { verifyActiveSubscription } from "@/lib/subscription";
 
+// THE FIX 1: Upgraded Fallback Config to 2026 Standards including ER Rates
 const FALLBACK_CONFIG = {
-  sss_min_msc: 4000, sss_max_msc: 30000, sss_ee_rate: 0.045,
-  phic_min_salary: 10000, phic_max_salary: 100000, phic_ee_rate: 0.025,
-  hdmf_max_salary: 10000, hdmf_ee_rate: 0.02
+  sss_min_msc: 5000, sss_max_msc: 35000, sss_ee_rate: 0.05, sss_er_rate: 0.10,
+  phic_min_salary: 10000, phic_max_salary: 100000, phic_ee_rate: 0.025, phic_er_rate: 0.025,
+  hdmf_max_salary: 10000, hdmf_ee_rate: 0.02, hdmf_er_rate: 0.02
 };
 
 // ============================================================================
-// NEW: BIR TRAIN LAW TAX CALCULATOR (2023-2024+ Rates)
+// BIR TRAIN LAW TAX CALCULATOR (2023-2026 Rates)
 // ============================================================================
 function calculateWithholdingTax(taxableIncome: number, schedule: string): number {
   if (taxableIncome <= 0) return 0;
@@ -119,7 +120,7 @@ export async function deleteEmployee(formData: FormData) {
 }
 
 // ============================================================================
-// 2. GENERATE NEW PAYROLL RUN (WITH TAX ENGINE)
+// 2. GENERATE NEW PAYROLL RUN (WITH EE/ER ENGINE)
 // ============================================================================
 export async function createPayrollRun(formData: FormData) {
   const supabase = await createClient();
@@ -155,8 +156,11 @@ export async function createPayrollRun(formData: FormData) {
     }
     grossPay = Math.round(grossPay * 100) / 100;
 
+    // THE FIX 2: Added variables for Employer Liabilities
     let sss = 0, phic = 0, hdmf = 0, tax = 0;
+    let sss_er = 0, phic_er = 0, hdmf_er = 0;
     let monthlyGross = grossPay;
+    
     if (emp.pay_schedule === 'SEMI_MONTHLY') monthlyGross = grossPay * 2;
     if (emp.pay_schedule === 'WEEKLY') monthlyGross = grossPay * 4;
 
@@ -164,34 +168,47 @@ export async function createPayrollRun(formData: FormData) {
       let msc = Math.round(monthlyGross / 500) * 500;
       msc = Math.max(config.sss_min_msc, Math.min(msc, config.sss_max_msc));
       sss = msc * config.sss_ee_rate;
+      sss_er = msc * config.sss_er_rate; 
     }
     if (emp.philhealth_enabled && grossPay > 0) {
-      phic = Math.max(config.phic_min_salary, Math.min(monthlyGross, config.phic_max_salary)) * config.phic_ee_rate;
+      const phicBase = Math.max(config.phic_min_salary, Math.min(monthlyGross, config.phic_max_salary));
+      phic = phicBase * config.phic_ee_rate;
+      phic_er = phicBase * config.phic_er_rate;
     }
     if (emp.pagibig_enabled && grossPay > 0) {
-      hdmf = Math.min(monthlyGross, config.hdmf_max_salary) * config.hdmf_ee_rate;
+      const hdmfBase = Math.min(monthlyGross, config.hdmf_max_salary);
+      hdmf = hdmfBase * config.hdmf_ee_rate;
+      hdmf_er = hdmfBase * config.hdmf_er_rate;
     }
 
-    if (emp.pay_schedule === 'SEMI_MONTHLY') { sss /= 2; phic /= 2; hdmf /= 2; }
-    if (emp.pay_schedule === 'WEEKLY') { sss /= 4; phic /= 4; hdmf /= 4; }
+    if (emp.pay_schedule === 'SEMI_MONTHLY') { sss /= 2; phic /= 2; hdmf /= 2; sss_er /= 2; phic_er /= 2; hdmf_er /= 2; }
+    if (emp.pay_schedule === 'WEEKLY') { sss /= 4; phic /= 4; hdmf /= 4; sss_er /= 4; phic_er /= 4; hdmf_er /= 4; }
 
     sss = Math.round(sss * 100) / 100;
     phic = Math.round(phic * 100) / 100;
     hdmf = Math.round(hdmf * 100) / 100;
+    sss_er = Math.round(sss_er * 100) / 100;
+    phic_er = Math.round(phic_er * 100) / 100;
+    hdmf_er = Math.round(hdmf_er * 100) / 100;
 
-    // Phase 2.5: Taxable Income = Gross - (SSS + PHIC + HDMF)
+    // Tax is calculated ONLY after deducting the Employee's share of contributions
     if (emp.tax_enabled && grossPay > 0) {
       const taxableIncome = grossPay - (sss + phic + hdmf);
       tax = calculateWithholdingTax(taxableIncome, emp.pay_schedule);
     }
 
     const netPay = Math.round((grossPay - (sss + phic + hdmf + tax)) * 100) / 100;
+    const totalErLiability = Math.round((sss_er + phic_er + hdmf_er) * 100) / 100;
 
+    // THE FIX 3: Expanded the JSONB breakdown while maintaining backward compatibility
     return {
       payroll_run_id: run!.id, employee_id: emp.id, business_id: businessId,
       gross_pay: grossPay, net_pay: netPay, 
       hours_worked: 0, overtime_hours: 0, commission_earned: 0,
-      breakdown: { sss, phic, hdmf, tax, ot_pay: 0 }
+      breakdown: { 
+        sss, phic, hdmf, tax, ot_pay: 0, 
+        sss_er, phic_er, hdmf_er, total_er_liability: totalErLiability 
+      }
     };
   });
 
@@ -201,7 +218,7 @@ export async function createPayrollRun(formData: FormData) {
 }
 
 // ============================================================================
-// 3. SAVE DRAFT (WITH TAX ENGINE)
+// 3. SAVE DRAFT (WITH EE/ER ENGINE)
 // ============================================================================
 export async function saveDraftPayslips(formData: FormData) {
   const supabase = await createClient();
@@ -240,7 +257,9 @@ export async function saveDraftPayslips(formData: FormData) {
     newGross = Math.round(newGross * 100) / 100;
 
     let sss = 0, phic = 0, hdmf = 0, tax = 0;
+    let sss_er = 0, phic_er = 0, hdmf_er = 0;
     let monthlyGross = newGross;
+
     if (emp.pay_schedule === 'SEMI_MONTHLY') monthlyGross = newGross * 2;
     if (emp.pay_schedule === 'WEEKLY') monthlyGross = newGross * 4;
 
@@ -248,34 +267,46 @@ export async function saveDraftPayslips(formData: FormData) {
       let msc = Math.round(monthlyGross / 500) * 500;
       msc = Math.max(config.sss_min_msc, Math.min(msc, config.sss_max_msc));
       sss = msc * config.sss_ee_rate;
+      sss_er = msc * config.sss_er_rate;
     }
     if (emp.philhealth_enabled && newGross > 0) {
-      phic = Math.max(config.phic_min_salary, Math.min(monthlyGross, config.phic_max_salary)) * config.phic_ee_rate;
+      const phicBase = Math.max(config.phic_min_salary, Math.min(monthlyGross, config.phic_max_salary));
+      phic = phicBase * config.phic_ee_rate;
+      phic_er = phicBase * config.phic_er_rate;
     }
     if (emp.pagibig_enabled && newGross > 0) {
-      hdmf = Math.min(monthlyGross, config.hdmf_max_salary) * config.hdmf_ee_rate;
+      const hdmfBase = Math.min(monthlyGross, config.hdmf_max_salary);
+      hdmf = hdmfBase * config.hdmf_ee_rate;
+      hdmf_er = hdmfBase * config.hdmf_er_rate;
     }
 
-    if (emp.pay_schedule === 'SEMI_MONTHLY') { sss /= 2; phic /= 2; hdmf /= 2; }
-    if (emp.pay_schedule === 'WEEKLY') { sss /= 4; phic /= 4; hdmf /= 4; }
+    if (emp.pay_schedule === 'SEMI_MONTHLY') { sss /= 2; phic /= 2; hdmf /= 2; sss_er /= 2; phic_er /= 2; hdmf_er /= 2; }
+    if (emp.pay_schedule === 'WEEKLY') { sss /= 4; phic /= 4; hdmf /= 4; sss_er /= 4; phic_er /= 4; hdmf_er /= 4; }
 
     sss = Math.round(sss * 100) / 100;
     phic = Math.round(phic * 100) / 100;
     hdmf = Math.round(hdmf * 100) / 100;
+    sss_er = Math.round(sss_er * 100) / 100;
+    phic_er = Math.round(phic_er * 100) / 100;
+    hdmf_er = Math.round(hdmf_er * 100) / 100;
 
-    // Phase 2.5: Taxable Income = Gross - (SSS + PHIC + HDMF)
     if (emp.tax_enabled && newGross > 0) {
       const taxableIncome = newGross - (sss + phic + hdmf);
       tax = calculateWithholdingTax(taxableIncome, emp.pay_schedule);
     }
 
     const netPay = Math.round((newGross - (sss + phic + hdmf + tax)) * 100) / 100;
+    const totalErLiability = Math.round((sss_er + phic_er + hdmf_er) * 100) / 100;
 
     return {
       id: slip.id, payroll_run_id: runId, employee_id: slip.employee_id, business_id: slip.business_id, 
       hours_worked: hoursWorked, overtime_hours: otHours, commission_earned: commEarned,
       gross_pay: newGross, net_pay: netPay, 
-      breakdown: { sss, phic, hdmf, tax, ot_pay: otPay }, updated_at: new Date().toISOString()
+      breakdown: { 
+        sss, phic, hdmf, tax, ot_pay: otPay,
+        sss_er, phic_er, hdmf_er, total_er_liability: totalErLiability 
+      }, 
+      updated_at: new Date().toISOString()
     };
   });
 
@@ -309,11 +340,24 @@ export async function disbursePayrollRun(formData: FormData) {
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
 
-  // 1. Calculate Total Gross Pay from this cycle
-  const { data: payslips } = await supabase.from("payslips").select("gross_pay").eq("payroll_run_id", runId);
-  const totalGross = (payslips || []).reduce((sum, slip) => sum + Number(slip.gross_pay), 0);
+  // THE FIX 4: Calculate both Total Gross and Total Employer Liability
+  const { data: payslips } = await supabase.from("payslips").select("gross_pay, breakdown").eq("payroll_run_id", runId);
+  
+  let totalGross = 0;
+  let totalERLiability = 0;
 
-  // 2. Find the "Salaries & Wages" category in their Chart of Accounts
+  (payslips || []).forEach(slip => {
+    totalGross += Number(slip.gross_pay);
+    const bd = slip.breakdown as any;
+    if (bd && bd.total_er_liability) {
+      totalERLiability += Number(bd.total_er_liability);
+    }
+  });
+
+  // The true cost to the business is Gross Pay + ER Tax Liabilities
+  const totalEmploymentCost = Math.round((totalGross + totalERLiability) * 100) / 100;
+
+  // Find the "Salaries & Wages" category
   let { data: category } = await supabase
     .from("accounts")
     .select("id")
@@ -323,7 +367,6 @@ export async function disbursePayrollRun(formData: FormData) {
 
   let categoryId = category?.id;
 
-  // Failsafe: If they accidentally deleted the category, recreate it instantly
   if (!categoryId) {
     const { data: newCat } = await supabase
       .from("accounts")
@@ -333,21 +376,20 @@ export async function disbursePayrollRun(formData: FormData) {
     categoryId = newCat?.id;
   }
 
-  // 3. Inject the Double-Entry Record into the Expenses Table
+  // Inject the Double-Entry Record with the true Total Employment Cost
   const { error: expError } = await supabase.from("expenses").insert([{
     business_id: businessId,
     account_id: accountId,
     category_id: categoryId,
-    amount: totalGross,
+    amount: totalEmploymentCost,
     date: new Date().toISOString().split('T')[0],
-    description: `Automated Payroll Disbursement (Cycle ID: ${runId.split('-')[0]})`,
+    description: `Payroll Cycle (${runId.split('-')[0]}) - Includes ₱${totalERLiability.toLocaleString('en-US', {minimumFractionDigits: 2})} in Employer Statutory Liabilities`,
     status: 'paid',
     created_by: user.id
   }]);
 
   if (expError) throw new Error("Failed to post expense to ledger: " + expError.message);
 
-  // 4. Lock the Payroll Run
   const { error: runError } = await supabase
     .from("payroll_runs")
     .update({ status: 'PAID', updated_at: new Date().toISOString() })
@@ -356,7 +398,8 @@ export async function disbursePayrollRun(formData: FormData) {
   if (runError) throw new Error("Failed to mark payroll as paid.");
 
   await logSecurityEvent({
-    businessId: businessId as string, actorId: user.id, action: "DISBURSED_PAYROLL", tableName: "payroll_runs", recordId: runId, details: { total_gross: totalGross, account_id: accountId }
+    businessId: businessId as string, actorId: user.id, action: "DISBURSED_PAYROLL", tableName: "payroll_runs", recordId: runId, 
+    details: { total_gross: totalGross, total_er_liability: totalERLiability, account_id: accountId }
   });
 
   revalidatePath("/");
@@ -384,50 +427,50 @@ export async function create13thMonthRun(formData: FormData) {
   const { data: employees } = await supabase.from("employees").select("*").eq("business_id", businessId).eq("is_active", true);
   if (!employees || employees.length === 0) throw new Error("No active employees found.");
 
-  // 1. Create the specialized 13th Month Run
   const { data: run } = await supabase.from("payroll_runs").insert([{
     business_id: businessId, 
     period_start: `${targetYear}-01-01`, 
     period_end: `${targetYear}-12-31`, 
     run_date: runDate, 
     status: 'DRAFT',
-    run_type: '13TH_MONTH', // Flags this to bypass standard UI deductions
+    run_type: '13TH_MONTH', 
     created_by: user.id
   }]).select("id").single();
 
   const draftPayslips = employees.map(emp => {
     let monthlyBase = 0;
 
-    // Normalize their pay to a Monthly equivalent
     const base = Number(emp.base_rate);
     if (emp.pay_type === 'FIXED_SALARY') {
       if (emp.pay_schedule === 'SEMI_MONTHLY') monthlyBase = base * 2;
       else if (emp.pay_schedule === 'WEEKLY') monthlyBase = base * 4;
       else monthlyBase = base;
     } else if (emp.pay_type === 'HOURLY') {
-      monthlyBase = (base * 8) * 22; // Est. 22 work days
+      monthlyBase = (base * 8) * 22; 
     } else {
-      monthlyBase = base; // Commission fallback
+      monthlyBase = base; 
     }
 
-    // DOLE Proration Logic: How many months did they work this year?
     const hireDate = new Date(emp.date_hired);
     let monthsWorked = 12;
     if (hireDate.getFullYear() === targetYear) {
       monthsWorked = 12 - hireDate.getMonth();
     } else if (hireDate.getFullYear() > targetYear) {
-      monthsWorked = 0; // Hired after the target year
+      monthsWorked = 0; 
     }
 
-    // The 13th Month Formula
     let total13th = (monthlyBase * monthsWorked) / 12;
     total13th = Math.round(total13th * 100) / 100;
 
     return {
       payroll_run_id: run!.id, employee_id: emp.id, business_id: businessId,
-      gross_pay: total13th, net_pay: total13th, // ZERO DEDUCTIONS ON 13TH MONTH!
+      gross_pay: total13th, net_pay: total13th, 
       hours_worked: 0, overtime_hours: 0, commission_earned: 0,
-      breakdown: { sss: 0, phic: 0, hdmf: 0, tax: 0, ot_pay: 0, is_13th_month: true }
+      breakdown: { 
+        sss: 0, phic: 0, hdmf: 0, tax: 0, ot_pay: 0, 
+        sss_er: 0, phic_er: 0, hdmf_er: 0, total_er_liability: 0,
+        is_13th_month: true 
+      }
     };
   });
 
@@ -446,7 +489,6 @@ export async function revertPayrollToDraft(formData: FormData) {
 
   const runId = formData.get("run_id") as string;
 
-  // SECURITY GUARD: Ensure it has not already been disbursed!
   const { data: run } = await supabase
     .from("payroll_runs")
     .select("status")
@@ -457,7 +499,6 @@ export async function revertPayrollToDraft(formData: FormData) {
     throw new Error("Critical Error: Cannot unlock a payroll cycle that has already been disbursed and posted to the ledger.");
   }
 
-  // Revert back to DRAFT
   const { error } = await supabase
     .from("payroll_runs")
     .update({ status: 'DRAFT', updated_at: new Date().toISOString() })
