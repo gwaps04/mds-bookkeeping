@@ -17,6 +17,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  // 1. THE GATEKEEPER: Fetch User & Business Context First
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, business_id, businesses(business_name, currency, is_tax_registered, show_net_cash_to_staff, show_taxes_to_staff, has_inventory_access)")
@@ -35,35 +36,33 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const canSeeNetCash = isOwner || bizData?.show_net_cash_to_staff !== false;
   const canSeeTaxes = isTaxEnabled && (isOwner || bizData?.show_taxes_to_staff === true);
 
-  const { data: incomeData } = await supabase
-    .from("income")
-    .select("id, amount, date, description, customers(name), accounts!income_category_id_fkey(type)")
-    .eq("business_id", businessId);
-    
-  const { data: expenseData } = await supabase.from("expenses").select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)").eq("business_id", businessId);
-  const { data: invoiceData } = await supabase.from("invoices").select("total_amount, status, income(amount)").eq("business_id", businessId);
-  
-  const { data: cogsData } = await supabase
-    .from("stock_movements")
-    .select("id, quantity, created_at, items!inner(unit_cost)")
-    .eq("business_id", businessId)
-    .eq("type", "STOCK_OUT")
-    .in("reference_type", ["INVOICE", "RECIPE_DEDUCTION"]);
+  // ============================================================================
+  // 2. THE ENGINE FIX: Parallel Data Fetching (Eliminates the 4-second delay)
+  // ============================================================================
+  const [
+    { data: incomeData },
+    { data: expenseData },
+    { data: invoiceData },
+    { data: cogsData },
+    { data: activeItems },
+    { data: rawRefunds }
+  ] = await Promise.all([
+    supabase.from("income").select("id, amount, date, description, customers(name), accounts!income_category_id_fkey(type)").eq("business_id", businessId),
+    supabase.from("expenses").select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)").eq("business_id", businessId),
+    supabase.from("invoices").select("total_amount, status, income(amount)").eq("business_id", businessId),
+    supabase.from("stock_movements").select("id, quantity, created_at, items!inner(unit_cost)").eq("business_id", businessId).eq("type", "STOCK_OUT").in("reference_type", ["INVOICE", "RECIPE_DEDUCTION"]),
+    hasInventoryAccess 
+      ? supabase.from("items").select("id, name, quantity_on_hand, reorder_threshold, unit_of_measure, type").eq("business_id", businessId).eq("is_archived", false) 
+      : Promise.resolve({ data: [] }),
+    supabase.from("refund_requests").select("id, amount, reason, created_at, requested_by").eq("business_id", businessId).eq("status", "pending")
+  ]);
 
   let lowStockItems: any[] = [];
   if (hasInventoryAccess) {
-    const { data: activeItems } = await supabase
-      .from("items")
-      .select("id, name, quantity_on_hand, reorder_threshold, unit_of_measure, type")
-      .eq("business_id", businessId)
-      .eq("is_archived", false);
-
     lowStockItems = (activeItems || []).filter(item => Number(item.quantity_on_hand) <= Number(item.reorder_threshold));
   }
 
-  const { data: rawRefunds } = await supabase.from("refund_requests").select("id, amount, reason, created_at, requested_by").eq("business_id", businessId).eq("status", "pending");
   let pendingRefunds: any[] = rawRefunds || [];
-
   if (pendingRefunds.length > 0) {
     const userIds = pendingRefunds.map(r => r.requested_by);
     const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", userIds);
@@ -73,6 +72,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     });
   }
 
+  // Time & Date Logic
   const now = new Date();
   const isDefaultState = !params.month && !params.year;
   const selectedMonth = params.month === 'all' ? 'all' : parseInt(params.month || String(now.getMonth() + 1));
@@ -98,6 +98,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     periodLabel = `${monthNames[selectedMonth as number]} ${selectedYear}`;
   }
 
+  // Calculation Engine
   let totalCashInAllTime = 0; 
   let totalExpensesAllTime = 0; 
   let periodRevenue = 0; 
@@ -113,23 +114,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   (incomeData || []).forEach((inc) => {
     const amt = Number(inc.amount);
     const isEquity = (inc.accounts as any)?.type === 'equity';
-    
     totalCashInAllTime += amt; 
-    
     if (isInPeriod(inc.date)) {
       periodTransactions++;
-      recentActivity.push({ 
-        id: inc.id, 
-        type: isEquity ? "equity" : "income", 
-        amount: amt, 
-        date: inc.date, 
-        party: (inc.customers as any)?.name || (isEquity ? "Business Owner" : "Walk-in Customer"), 
-        description: inc.description || (isEquity ? "Capital Injection" : "Cash Receipt") 
-      });
-
-      if (!isEquity) {
-        periodRevenue += amt; 
-      }
+      recentActivity.push({ id: inc.id, type: isEquity ? "equity" : "income", amount: amt, date: inc.date, party: (inc.customers as any)?.name || (isEquity ? "Business Owner" : "Walk-in Customer"), description: inc.description || (isEquity ? "Capital Injection" : "Cash Receipt") });
+      if (!isEquity) periodRevenue += amt; 
     }
   });
 
@@ -191,8 +180,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <div>
             <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-1.5">Quick Guide: Reading Your Dashboard</h3>
             <ul className="text-xs sm:text-sm text-blue-800 space-y-1.5 leading-relaxed list-disc list-inside ml-2">
-              <li><strong>The Time Filter:</strong> Use the dropdowns in the top right to analyze specific months or your entire fiscal year. The metric cards will instantly calculate data for your chosen period.</li>
-              <li><strong>Net Cash vs. Revenue:</strong> <em>Net Cash Balance</em> tracks your absolute Cash flow (all money in minus all money out). <em>Total Revenue</em> strictly tracks sales (it automatically hides personal Equity injections to protect your tax calculations).</li>
+              <li><strong>The Time Filter:</strong> Use the dropdowns to analyze specific months. The metric cards instantly calculate data for your chosen period.</li>
+              <li><strong>Net Cash vs. Revenue:</strong> <em>Net Cash Balance</em> tracks absolute Cash flow. <em>Total Revenue</em> strictly tracks sales (it automatically hides personal Equity injections).</li>
             </ul>
           </div>
         </div>
@@ -309,7 +298,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* THE FIX: UNPAID INVOICES CARD RESTORED */}
         <Link href="/invoices?status=overdue" className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-blue-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
             <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -328,7 +316,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* THE FIX: TAXES PAID CARD RESTORED */}
         {canSeeTaxes && (
           <Link href={`/taxes?month=${selectedMonth}&year=${selectedYear}`} className="block group">
             <Card className="shadow-sm border-neutral-200 bg-white hover:border-orange-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
@@ -387,54 +374,78 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      {/* RECENT ACTIVITY TABLE - FLUID OPTIMIZED */}
+      {/* ==============================================================================
+          3. THE UI FIX: Fluid List-Table (Eliminates the Mobile Table Crash)
+          ============================================================================== */}
       <div className="mt-8">
         <h3 className="text-base sm:text-lg font-semibold text-neutral-900 mb-4">Recent Activity ({periodLabel})</h3>
+        
         <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden w-full">
-          <div className="w-full">
-            <table className="w-full text-left text-sm table-auto">
-              <thead className="bg-neutral-50/80 border-b border-neutral-200">
-                <tr>
-                  <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] whitespace-nowrap w-auto">Date</th>
-                  <th className="hidden sm:table-cell px-6 py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[11px] whitespace-nowrap w-auto">Entity</th>
-                  <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] w-full">Description</th>
-                  <th className="px-4 sm:px-6 py-3 sm:py-4 font-semibold text-neutral-600 uppercase tracking-wider text-[10px] sm:text-[11px] text-right whitespace-nowrap w-auto">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {top5Activity.length === 0 ? (
-                  <tr><td colSpan={4} className="px-6 py-12 text-center text-neutral-500">No activity logged for this period.</td></tr>
-                ) : (
-                  top5Activity.map((activity) => (
-                    <tr key={`${activity.type}-${activity.id}`} className="hover:bg-neutral-50 transition-colors">
-                      <td className="px-4 sm:px-6 py-3 sm:py-4 text-neutral-500 font-medium whitespace-nowrap text-xs sm:text-sm">
-                        {new Date(activity.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </td>
-                      <td className="hidden sm:table-cell px-6 py-4 font-bold text-neutral-900 whitespace-nowrap">
-                        {activity.party}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 sm:py-4 text-neutral-600 w-full">
-                        <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] md:text-[11px] uppercase tracking-wider font-bold shadow-sm break-words whitespace-normal leading-relaxed ${
-                          activity.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 
-                          activity.type === 'equity' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 
-                          'bg-rose-50 text-rose-700 border border-rose-200'
-                        }`}>
-                          {activity.description}
-                        </span>
-                      </td>
-                      <td className={`px-4 sm:px-6 py-3 sm:py-4 text-right font-black text-sm sm:text-base whitespace-nowrap ${
-                        activity.type === 'income' ? 'text-emerald-600' : 
-                        activity.type === 'equity' ? 'text-purple-600' : 
-                        'text-rose-600'
-                      }`}>
-                        {activity.type === 'expense' ? '-' : '+'}{formatCurrency(activity.amount)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          {top5Activity.length === 0 ? (
+            <div className="px-6 py-12 text-center text-neutral-500 text-sm">No activity logged for this period.</div>
+          ) : (
+            <div className="flex flex-col divide-y divide-neutral-100">
+              
+              {/* DESKTOP HEADER ROW (Hidden on Mobile) */}
+              <div className="hidden sm:grid grid-cols-[5rem_1.5fr_2fr_8rem] lg:grid-cols-[6rem_1.5fr_2.5fr_8rem] gap-4 px-6 py-3.5 bg-neutral-50/80 text-[11px] font-bold text-neutral-500 uppercase tracking-wider">
+                <div>Date</div>
+                <div>Entity</div>
+                <div>Description</div>
+                <div className="text-right">Amount</div>
+              </div>
+
+              {/* DATA ROWS (Fluid transformation across all breakpoints) */}
+              {top5Activity.map((activity) => (
+                <div key={`${activity.type}-${activity.id}`} className="relative grid grid-cols-1 sm:grid-cols-[5rem_1.5fr_2fr_8rem] lg:grid-cols-[6rem_1.5fr_2.5fr_8rem] gap-y-2.5 sm:gap-x-4 px-5 sm:px-6 py-4.5 sm:py-4 hover:bg-neutral-50 transition-colors items-start sm:items-center group">
+                  
+                  {/* MOBILE TOP BAR (Date & Amount together) */}
+                  <div className="flex justify-between items-center w-full sm:hidden mb-1">
+                    <span className="text-[11px] text-neutral-500 font-bold uppercase tracking-wider">
+                      {new Date(activity.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className={`font-black text-base whitespace-nowrap ${
+                      activity.type === 'income' ? 'text-emerald-600' : 
+                      activity.type === 'equity' ? 'text-purple-600' : 
+                      'text-rose-600'
+                    }`}>
+                      {activity.type === 'expense' ? '-' : '+'}{formatCurrency(activity.amount)}
+                    </span>
+                  </div>
+
+                  {/* DESKTOP DATE */}
+                  <div className="hidden sm:block text-xs sm:text-sm text-neutral-500 font-medium whitespace-nowrap">
+                    {new Date(activity.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </div>
+
+                  {/* ENTITY NAME */}
+                  <div className="text-sm sm:text-sm font-bold text-neutral-900 truncate w-full">
+                    {activity.party}
+                  </div>
+
+                  {/* DESCRIPTION PILL */}
+                  <div className="w-full">
+                    <span className={`inline-block px-2.5 py-1.5 sm:py-1 rounded-md text-[10px] md:text-[11px] uppercase tracking-wider font-bold shadow-sm break-words whitespace-normal leading-snug sm:leading-relaxed ${
+                      activity.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 
+                      activity.type === 'equity' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 
+                      'bg-rose-50 text-rose-700 border border-rose-200'
+                    }`}>
+                      {activity.description}
+                    </span>
+                  </div>
+
+                  {/* DESKTOP AMOUNT */}
+                  <div className={`hidden sm:block text-right font-black text-sm sm:text-base whitespace-nowrap ${
+                    activity.type === 'income' ? 'text-emerald-600' : 
+                    activity.type === 'equity' ? 'text-purple-600' : 
+                    'text-rose-600'
+                  }`}>
+                    {activity.type === 'expense' ? '-' : '+'}{formatCurrency(activity.amount)}
+                  </div>
+                  
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
