@@ -43,7 +43,7 @@ export default async function NewInvoicePage() {
     .order("name");
 
   // ============================================================================
-  // THE FIX: Fetch BOTH Sellable Simple and Composite Menu Items!
+  // THE FIX: Sort by system timestamp (created_at) DESC instead of alphabetically
   // ============================================================================
   const { data: inventoryItems } = await supabase
     .from("items")
@@ -51,7 +51,7 @@ export default async function NewInvoicePage() {
     .eq("business_id", profile?.business_id)
     .eq("is_archived", false) // Ensures deleted items don't show up in the dropdown
     .in("type", ["SELLABLE_SIMPLE", "SELLABLE_COMPOSITE"])
-    .order("name");
+    .order("created_at", { ascending: false }); // <--- CHANGED FROM "name"
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">

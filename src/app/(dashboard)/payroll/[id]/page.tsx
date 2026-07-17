@@ -1,13 +1,14 @@
 // src/app/(dashboard)/payroll/[id]/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowLeft, Users, Calculator, Wallet, Clock, AlertCircle, CheckCircle2 } from "lucide-react";
 
-// Import the Action Bar we created
+// Import the Action Bar and our new Edit Dialog
 import PayrollStateActionBar from "@/features/payroll/components/PayrollStateActionBar"; 
+import EditCycleDatesDialog from "./EditCycleDatesDialog"; // THE FIX: Imported the Dialog
 import { saveDraftPayslips } from "@/features/payroll/actions";
 import SubmitButton from "@/components/SubmitButton";
 
@@ -24,7 +25,7 @@ export default async function PayrollReviewPage(props: { params: Promise<{ id: s
   if (!user) redirect("/login");
 
   // ============================================================================
-  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags
+  // TWO-KEY RBAC FLAGS
   // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
@@ -42,22 +43,14 @@ export default async function PayrollReviewPage(props: { params: Promise<{ id: s
   const currency = bizData?.currency || "PHP";
 
   // ============================================================================
-  // THE HARD GUARD: SERVER-SIDE SUB-ROUTE PROTECTION
+  // SERVER-SIDE SUB-ROUTE PROTECTION
   // ============================================================================
   const isSuperAdmin = profile?.role === 'super_admin';
   const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
   const bizHasPayroll = bizData?.has_payroll_access === true;
 
-  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
-  if (!bizHasPayroll && !isSuperAdmin) {
-    redirect("/dashboard");
-  }
-
-  // Key 2: If the user is a staff member WITHOUT explicit HR clearance, kick them out.
-  if (!isOwner && profile?.can_access_payroll !== true) {
-    redirect("/dashboard");
-  }
-  // ============================================================================
+  if (!bizHasPayroll && !isSuperAdmin) redirect("/dashboard");
+  if (!isOwner && profile?.can_access_payroll !== true) redirect("/dashboard");
 
   // 1. Fetch the exact Payroll Run
   const { data: run } = await supabase
@@ -118,13 +111,25 @@ export default async function PayrollReviewPage(props: { params: Promise<{ id: s
                 {isDraft ? 'Step 1: Draft Mode' : isFinalized ? 'Step 2: Awaiting Payout' : 'Step 3: Disbursed'}
               </span>
             </div>
-            <p className="text-sm sm:text-base text-neutral-500 mt-1">
-              Period: {new Date(run.period_start).toLocaleDateString()} - {new Date(run.period_end).toLocaleDateString()}
-            </p>
+            
+            {/* THE FIX: Injected the Edit Component perfectly into the metadata layout */}
+            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+              <p className="text-sm sm:text-base text-neutral-500">
+                Period: {new Date(run.period_start).toLocaleDateString()} - {new Date(run.period_end).toLocaleDateString()}
+              </p>
+              <EditCycleDatesDialog 
+                runId={run.id}
+                currentStart={run.period_start}
+                currentEnd={run.period_end}
+                currentPayout={run.run_date}
+                status={run.status}
+              />
+            </div>
+
           </div>
         </div>
 
-        {/* INJECTING THE STATE MACHINE ACTION BAR */}
+        {/* STATE MACHINE ACTION BAR */}
         <div className="shrink-0 w-full lg:w-auto border-t lg:border-t-0 pt-4 lg:pt-0 border-neutral-200">
           <PayrollStateActionBar 
             runId={runId} 

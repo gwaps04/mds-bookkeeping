@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit";
 import { verifyActiveSubscription } from "@/lib/subscription";
 
-// THE FIX 1: Upgraded Fallback Config to 2026 Standards including ER Rates
+// Upgraded Fallback Config to 2026 Standards including ER Rates
 const FALLBACK_CONFIG = {
   sss_min_msc: 5000, sss_max_msc: 35000, sss_ee_rate: 0.05, sss_er_rate: 0.10,
   phic_min_salary: 10000, phic_max_salary: 100000, phic_ee_rate: 0.025, phic_er_rate: 0.025,
@@ -120,7 +120,7 @@ export async function deleteEmployee(formData: FormData) {
 }
 
 // ============================================================================
-// 2. GENERATE NEW PAYROLL RUN (WITH EE/ER ENGINE)
+// 2. GENERATE NEW PAYROLL RUN (WITH EE/ER ENGINE & EXCLUSION FILTER)
 // ============================================================================
 export async function createPayrollRun(formData: FormData) {
   const supabase = await createClient();
@@ -133,8 +133,17 @@ export async function createPayrollRun(formData: FormData) {
   const { data: configData } = await supabase.from("statutory_config").select("*").order("effective_year", { ascending: false }).limit(1);
   const config = configData?.[0] || FALLBACK_CONFIG;
 
-  const { data: employees } = await supabase.from("employees").select("*").eq("business_id", businessId).eq("is_active", true);
-  if (!employees || employees.length === 0) throw new Error("No active employees found.");
+  const excludedStr = formData.get("excluded_employees") as string;
+  const excludedIds: string[] = excludedStr ? JSON.parse(excludedStr) : [];
+
+  const { data: allActiveEmployees } = await supabase.from("employees").select("*").eq("business_id", businessId).eq("is_active", true);
+  
+  const employees = (allActiveEmployees || []).filter(emp => !excludedIds.includes(emp.id));
+
+  // The Zero-Payload Guard
+  if (!employees || employees.length === 0) {
+    throw new Error("You must include at least one active employee to generate a payroll draft.");
+  }
 
   const { data: run } = await supabase.from("payroll_runs").insert([{
     business_id: businessId, 
@@ -156,7 +165,6 @@ export async function createPayrollRun(formData: FormData) {
     }
     grossPay = Math.round(grossPay * 100) / 100;
 
-    // THE FIX 2: Added variables for Employer Liabilities
     let sss = 0, phic = 0, hdmf = 0, tax = 0;
     let sss_er = 0, phic_er = 0, hdmf_er = 0;
     let monthlyGross = grossPay;
@@ -191,7 +199,6 @@ export async function createPayrollRun(formData: FormData) {
     phic_er = Math.round(phic_er * 100) / 100;
     hdmf_er = Math.round(hdmf_er * 100) / 100;
 
-    // Tax is calculated ONLY after deducting the Employee's share of contributions
     if (emp.tax_enabled && grossPay > 0) {
       const taxableIncome = grossPay - (sss + phic + hdmf);
       tax = calculateWithholdingTax(taxableIncome, emp.pay_schedule);
@@ -200,7 +207,6 @@ export async function createPayrollRun(formData: FormData) {
     const netPay = Math.round((grossPay - (sss + phic + hdmf + tax)) * 100) / 100;
     const totalErLiability = Math.round((sss_er + phic_er + hdmf_er) * 100) / 100;
 
-    // THE FIX 3: Expanded the JSONB breakdown while maintaining backward compatibility
     return {
       payroll_run_id: run!.id, employee_id: emp.id, business_id: businessId,
       gross_pay: grossPay, net_pay: netPay, 
@@ -218,7 +224,7 @@ export async function createPayrollRun(formData: FormData) {
 }
 
 // ============================================================================
-// 3. SAVE DRAFT (WITH EE/ER ENGINE)
+// 3. SAVE DRAFT (WITH EE/ER ENGINE & OVERRIDES)
 // ============================================================================
 export async function saveDraftPayslips(formData: FormData) {
   const supabase = await createClient();
@@ -340,7 +346,6 @@ export async function disbursePayrollRun(formData: FormData) {
   const { data: profile } = await supabase.from("profiles").select("business_id").eq("id", user.id).single();
   const businessId = profile?.business_id;
 
-  // THE FIX 4: Calculate both Total Gross and Total Employer Liability
   const { data: payslips } = await supabase.from("payslips").select("gross_pay, breakdown").eq("payroll_run_id", runId);
   
   let totalGross = 0;
@@ -354,10 +359,8 @@ export async function disbursePayrollRun(formData: FormData) {
     }
   });
 
-  // The true cost to the business is Gross Pay + ER Tax Liabilities
   const totalEmploymentCost = Math.round((totalGross + totalERLiability) * 100) / 100;
 
-  // Find the "Salaries & Wages" category
   let { data: category } = await supabase
     .from("accounts")
     .select("id")
@@ -376,7 +379,6 @@ export async function disbursePayrollRun(formData: FormData) {
     categoryId = newCat?.id;
   }
 
-  // Inject the Double-Entry Record with the true Total Employment Cost
   const { error: expError } = await supabase.from("expenses").insert([{
     business_id: businessId,
     account_id: accountId,
@@ -410,7 +412,7 @@ export async function disbursePayrollRun(formData: FormData) {
 }
 
 // ============================================================================
-// 6. GENERATE 13TH MONTH PAY (DOLE COMPLIANT)
+// 6. GENERATE 13TH MONTH PAY (DOLE COMPLIANT & EXCLUSION FILTER)
 // ============================================================================
 export async function create13thMonthRun(formData: FormData) {
   const supabase = await createClient();
@@ -424,8 +426,17 @@ export async function create13thMonthRun(formData: FormData) {
   const targetYear = parseInt(formData.get("year") as string);
   const runDate = formData.get("run_date") as string;
 
-  const { data: employees } = await supabase.from("employees").select("*").eq("business_id", businessId).eq("is_active", true);
-  if (!employees || employees.length === 0) throw new Error("No active employees found.");
+  const excludedStr = formData.get("excluded_employees") as string;
+  const excludedIds: string[] = excludedStr ? JSON.parse(excludedStr) : [];
+
+  const { data: allActiveEmployees } = await supabase.from("employees").select("*").eq("business_id", businessId).eq("is_active", true);
+  
+  const employees = (allActiveEmployees || []).filter(emp => !excludedIds.includes(emp.id));
+
+  // The Zero-Payload Guard
+  if (!employees || employees.length === 0) {
+    throw new Error("You must include at least one active employee to generate a 13th month draft.");
+  }
 
   const { data: run } = await supabase.from("payroll_runs").insert([{
     business_id: businessId, 
@@ -508,4 +519,47 @@ export async function revertPayrollToDraft(formData: FormData) {
   
   revalidatePath("/payroll");
   revalidatePath(`/payroll/${runId}`);
+}
+
+// ============================================================================
+// 8. UPDATE PAYROLL CYCLE DATES (THE MISSING FUNCTION RESTORED!)
+// ============================================================================
+export async function updatePayrollCycleDates(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const runId = formData.get("run_id") as string;
+  const periodStart = formData.get("period_start") as string;
+  const periodEnd = formData.get("period_end") as string;
+  const runDate = formData.get("run_date") as string;
+
+  // SECURITY GUARD: Fetch current status
+  const { data: run } = await supabase
+    .from("payroll_runs")
+    .select("status")
+    .eq("id", runId)
+    .single();
+
+  // STATE MACHINE CONSTRAINT: Only allow edits if it is a DRAFT
+  if (run?.status !== 'DRAFT') {
+    throw new Error("Security Lock: You cannot modify the dates of a payroll cycle that has already been finalized or disbursed.");
+  }
+
+  // Execute the update
+  const { error } = await supabase
+    .from("payroll_runs")
+    .update({ 
+      period_start: periodStart, 
+      period_end: periodEnd, 
+      run_date: runDate,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", runId);
+
+  if (error) throw new Error(error.message);
+  
+  // Revalidate both the specific review page and the main hub
+  revalidatePath(`/payroll/${runId}`);
+  revalidatePath("/payroll");
 }

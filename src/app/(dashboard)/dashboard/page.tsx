@@ -7,17 +7,18 @@ import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
 import DashboardHelpButton from "./DashboardHelpButton"; 
 import LowStockWidget from "./LowStockWidget"; 
+import TablePagination from "@/components/TablePagination"; // THE FIX: Imported Pagination Component
 import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, PackageMinus, Target, Info } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ month?: string, year?: string }> }) {
+// THE FIX: Added 'page' to searchParams typing
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ month?: string, year?: string, page?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 1. THE GATEKEEPER: Fetch User & Business Context First
   const { data: profile } = await supabase
     .from("profiles")
     .select("role, business_id, businesses(business_name, currency, is_tax_registered, show_net_cash_to_staff, show_taxes_to_staff, has_inventory_access)")
@@ -36,9 +37,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const canSeeNetCash = isOwner || bizData?.show_net_cash_to_staff !== false;
   const canSeeTaxes = isTaxEnabled && (isOwner || bizData?.show_taxes_to_staff === true);
 
-  // ============================================================================
-  // 2. THE ENGINE FIX: Parallel Data Fetching (Eliminates the 4-second delay)
-  // ============================================================================
   const [
     { data: incomeData },
     { data: expenseData },
@@ -72,11 +70,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     });
   }
 
-  // Time & Date Logic
   const now = new Date();
   const isDefaultState = !params.month && !params.year;
   const selectedMonth = params.month === 'all' ? 'all' : parseInt(params.month || String(now.getMonth() + 1));
   const selectedYear = parseInt(params.year || String(now.getFullYear()));
+
+  // THE FIX: Parse the current page for the Activity Widget
+  const ITEMS_PER_PAGE = 5;
+  const currentPage = parseInt(params.page || '1');
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
 
   const isInPeriod = (dateString: string) => {
     if (!dateString) return false;
@@ -98,7 +101,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     periodLabel = `${monthNames[selectedMonth as number]} ${selectedYear}`;
   }
 
-  // Calculation Engine
   let totalCashInAllTime = 0; 
   let totalExpensesAllTime = 0; 
   let periodRevenue = 0; 
@@ -151,7 +153,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const periodNetIncome = periodGrossProfit - periodExpenses; 
   
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const top5Activity = recentActivity.slice(0, 5);
+  
+  // THE FIX: Slice the array based on the dynamic URL page parameter
+  const totalActivityItems = recentActivity.length;
+  const paginatedActivity = recentActivity.slice(startIndex, endIndex);
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
 
@@ -333,7 +338,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </p>
               </CardContent>
             </Card>
-          </Link>
+        </Link>
         )}
       </div>
 
@@ -375,18 +380,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       )}
 
       {/* ==============================================================================
-          3. THE UI FIX: Fluid List-Table (Eliminates the Mobile Table Crash)
+          THE UI FIX: Fluid List-Table With Implemented Pagination
           ============================================================================== */}
       <div className="mt-8">
         <h3 className="text-base sm:text-lg font-semibold text-neutral-900 mb-4">Recent Activity ({periodLabel})</h3>
         
-        <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden w-full">
-          {top5Activity.length === 0 ? (
+        <Card className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden w-full">
+          {paginatedActivity.length === 0 ? (
             <div className="px-6 py-12 text-center text-neutral-500 text-sm">No activity logged for this period.</div>
           ) : (
             <div className="flex flex-col divide-y divide-neutral-100">
               
-              {/* DESKTOP HEADER ROW (Hidden on Mobile) */}
               <div className="hidden sm:grid grid-cols-[5rem_1.5fr_2fr_8rem] lg:grid-cols-[6rem_1.5fr_2.5fr_8rem] gap-4 px-6 py-3.5 bg-neutral-50/80 text-[11px] font-bold text-neutral-500 uppercase tracking-wider">
                 <div>Date</div>
                 <div>Entity</div>
@@ -394,11 +398,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="text-right">Amount</div>
               </div>
 
-              {/* DATA ROWS (Fluid transformation across all breakpoints) */}
-              {top5Activity.map((activity) => (
+              {/* DATA ROWS: Uses paginatedActivity instead of top5Activity */}
+              {paginatedActivity.map((activity) => (
                 <div key={`${activity.type}-${activity.id}`} className="relative grid grid-cols-1 sm:grid-cols-[5rem_1.5fr_2fr_8rem] lg:grid-cols-[6rem_1.5fr_2.5fr_8rem] gap-y-2.5 sm:gap-x-4 px-5 sm:px-6 py-4.5 sm:py-4 hover:bg-neutral-50 transition-colors items-start sm:items-center group">
                   
-                  {/* MOBILE TOP BAR (Date & Amount together) */}
                   <div className="flex justify-between items-center w-full sm:hidden mb-1">
                     <span className="text-[11px] text-neutral-500 font-bold uppercase tracking-wider">
                       {new Date(activity.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -412,17 +415,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     </span>
                   </div>
 
-                  {/* DESKTOP DATE */}
                   <div className="hidden sm:block text-xs sm:text-sm text-neutral-500 font-medium whitespace-nowrap">
                     {new Date(activity.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </div>
 
-                  {/* ENTITY NAME */}
                   <div className="text-sm sm:text-sm font-bold text-neutral-900 truncate w-full">
                     {activity.party}
                   </div>
 
-                  {/* DESCRIPTION PILL */}
                   <div className="w-full">
                     <span className={`inline-block px-2.5 py-1.5 sm:py-1 rounded-md text-[10px] md:text-[11px] uppercase tracking-wider font-bold shadow-sm break-words whitespace-normal leading-snug sm:leading-relaxed ${
                       activity.type === 'income' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 
@@ -433,7 +433,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     </span>
                   </div>
 
-                  {/* DESKTOP AMOUNT */}
                   <div className={`hidden sm:block text-right font-black text-sm sm:text-base whitespace-nowrap ${
                     activity.type === 'income' ? 'text-emerald-600' : 
                     activity.type === 'equity' ? 'text-purple-600' : 
@@ -446,7 +445,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               ))}
             </div>
           )}
-        </div>
+
+          {/* THE FIX: Injected the TablePagination Component */}
+          <div className="border-t border-neutral-200 bg-neutral-50/50">
+            <TablePagination 
+              totalItems={totalActivityItems} 
+              itemsPerPage={ITEMS_PER_PAGE} 
+              currentPage={currentPage} 
+            />
+          </div>
+        </Card>
       </div>
     </div>
   );

@@ -52,12 +52,12 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
   if (!isOwner && profile?.can_access_payroll !== true) redirect("/dashboard");
 
   // ============================================================================
-  // PARALLEL DATA FETCHING (PROMISE.ALL)
+  // PARALLEL DATA FETCHING: FETCHING BOTH ROSTER AND RUNS
   // ============================================================================
   let query = supabase
     .from("payroll_runs")
     .select(`
-      id, period_start, period_end, run_date, status, created_at,
+      id, period_start, period_end, run_date, status, run_type, created_at,
       payslips ( id, gross_pay, net_pay )
     `, { count: 'exact' })
     .eq("business_id", businessId)
@@ -70,14 +70,15 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
 
   const [
     { data: rawPayrollRuns, count },
-    { count: activeEmployees }
+    { data: activeEmployees } 
   ] = await Promise.all([
     query,
-    supabase.from("employees").select("*", { count: 'exact', head: true }).eq("business_id", businessId).eq("is_active", true)
+    supabase.from("employees").select("id, first_name, last_name, position").eq("business_id", businessId).eq("is_active", true).order("first_name")
   ]);
 
   const payrollRuns = rawPayrollRuns || [];
   const totalItems = count || 0;
+  const employeesList = activeEmployees || []; 
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
 
@@ -97,7 +98,8 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
             </Button>
           </Link>
           <div className="flex-1 sm:flex-none">
-            <NewRunDialog />
+            {/* THE FIX: Feeding BOTH the employee roster and the historical runs into the Dialog */}
+            <NewRunDialog employees={employeesList} existingRuns={payrollRuns} />
           </div>
         </div>
       </div>
@@ -111,7 +113,7 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
             </div>
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Active Employees</p>
-              <p className="text-2xl font-black text-neutral-900 tracking-tight leading-none mt-1">{activeEmployees || 0}</p>
+              <p className="text-2xl font-black text-neutral-900 tracking-tight leading-none mt-1">{employeesList.length}</p>
             </div>
           </CardContent>
         </Card>
@@ -147,7 +149,7 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
         </div>
       </form>
 
-      {/* THE FIX: CSS GRID LIST WITH DELAYED BREAKPOINTS (lg instead of md) */}
+      {/* CSS GRID LIST WITH DELAYED BREAKPOINTS */}
       <Card className="shadow-sm border-neutral-200 overflow-hidden flex flex-col bg-white w-full min-w-0">
         <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 lg:py-5 shrink-0">
           <CardTitle className="text-lg flex items-center gap-2">
@@ -168,7 +170,7 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
           ) : (
             <div className="flex flex-col divide-y divide-neutral-100/80">
               
-              {/* DESKTOP HEADER ROW (Hidden on Mobile AND Tablet) */}
+              {/* DESKTOP HEADER ROW */}
               <div className="hidden lg:grid grid-cols-[2fr_1fr_1fr_1.5fr_140px] xl:grid-cols-[2.5fr_1fr_1fr_1.5fr_160px] gap-4 px-6 py-3 bg-white border-b border-neutral-200 text-[11px] font-bold text-neutral-500 uppercase tracking-wider items-center">
                 <div>Pay Period Details</div>
                 <div>Payout Date</div>
@@ -177,7 +179,7 @@ export default async function PayrollHubPage(props: { searchParams: Promise<{ se
                 <div className="text-center">Actions</div>
               </div>
 
-              {/* DATA ROWS (Fluid layout) */}
+              {/* DATA ROWS */}
               {payrollRuns.map((run) => {
                 const slips = run.payslips as any[];
                 const totalNet = slips.reduce((sum, slip) => sum + Number(slip.net_pay), 0);

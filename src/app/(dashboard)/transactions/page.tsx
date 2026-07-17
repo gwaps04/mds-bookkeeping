@@ -35,15 +35,17 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
 
-  // 1. BUILD BASE QUERIES
+  // ============================================================================
+  // 1. THE FIX: INJECT `created_at` INTO THE SUPABASE QUERIES
+  // ============================================================================
   let expQuery = supabase
     .from("expenses")
-    .select(`id, date, description, amount, bank:accounts!expenses_account_id_fkey(name), category:accounts!expenses_category_id_fkey(name)`)
+    .select(`id, date, created_at, description, amount, bank:accounts!expenses_account_id_fkey(name), category:accounts!expenses_category_id_fkey(name)`)
     .eq("business_id", businessId);
 
   let incQuery = supabase
     .from("income")
-    .select(`id, date, description, amount, bank:accounts!income_account_id_fkey(name), category:accounts!income_category_id_fkey(name)`)
+    .select(`id, date, created_at, description, amount, bank:accounts!income_account_id_fkey(name), category:accounts!income_category_id_fkey(name)`)
     .eq("business_id", businessId);
 
   // 2. APPLY DATABASE SEARCH FILTERS
@@ -65,8 +67,17 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
     allTransactions.push(...(expenses || []).map(e => ({ ...e, type: "Expense" })));
   }
 
-  // 4. SORT CHRONOLOGICALLY
-  allTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // ============================================================================
+  // 4. THE FIX: DETERMINISTIC MILLISECOND SORTING (LATEST TO OLDEST)
+  // ============================================================================
+  allTransactions.sort((a, b) => {
+    // We use the absolute system timestamp (created_at) to guarantee order.
+    // If a manual entry somehow lacks created_at, it gracefully falls back to the calendar date.
+    const timeA = new Date(a.created_at || a.date).getTime();
+    const timeB = new Date(b.created_at || b.date).getTime();
+    
+    return timeB - timeA; // Positive result pushes 'b' before 'a' (Descending)
+  });
 
   // 5. IN-MEMORY SERVER SLICE FOR PAGINATION
   const totalItems = allTransactions.length;
@@ -146,11 +157,10 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
       <Card className="shadow-sm border-neutral-200 flex flex-col w-full overflow-hidden bg-white">
         <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 shrink-0">
           <CardTitle className="text-lg flex items-center gap-2"><BookOpen size={18} className="text-neutral-500"/> Transaction History</CardTitle>
-          <CardDescription>All records sorted by date.</CardDescription>
+          <CardDescription>All records sorted mathematically by exact timestamp.</CardDescription>
         </CardHeader>
         
         <CardContent className="p-0 flex-1 w-full overflow-x-auto">
-          {/* THE FIX: Replaced min-w-[800px] with table-auto. Hidden columns on mobile are injected into the Description row! */}
           <table className="w-full text-left text-sm table-auto">
             <thead className="bg-white border-b border-neutral-200">
               <tr>
@@ -172,18 +182,15 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
                 paginatedTransactions.map((t) => (
                   <tr key={t.id} className="hover:bg-neutral-50/60 transition-colors group">
                     
-                    {/* 1. DATE: Shortens format organically on narrow screens */}
                     <td className="px-4 sm:px-6 py-4 text-neutral-500 font-medium whitespace-nowrap text-xs sm:text-sm align-top sm:align-middle">
                       {new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </td>
                     
-                    {/* 2. DESCRIPTION & PROGRESSIVE STACKING */}
                     <td className="px-4 sm:px-6 py-4 whitespace-normal break-words w-full min-w-[150px] align-top sm:align-middle">
                       <p className="font-bold text-neutral-900 text-sm leading-tight">
                         {t.description || <span className="text-neutral-400 italic">No description</span>}
                       </p>
                       
-                      {/* THE MAGIC: Mobile-only visible details (Category hidden on md, Bank hidden on sm) */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2 md:hidden">
                         <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shadow-sm ${
                           t.type === 'Income' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -196,7 +203,6 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
                       </div>
                     </td>
 
-                    {/* 3. CATEGORY: Hidden on mobile (because it is stacked in Description) */}
                     <td className="hidden md:table-cell px-4 sm:px-6 py-4 align-middle whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border shadow-sm ${
                         t.type === 'Income' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -205,12 +211,10 @@ export default async function TransactionsPage(props: { searchParams: Promise<{ 
                       </span>
                     </td>
                     
-                    {/* 4. BANK: Hidden on mobile (because it is stacked in Description) */}
                     <td className="hidden sm:table-cell px-4 sm:px-6 py-4 text-neutral-600 text-xs sm:text-sm font-medium align-middle whitespace-nowrap">
                       {(t.bank as any)?.name || <span className="text-neutral-400 italic">Unknown Account</span>}
                     </td>
 
-                    {/* 5. AMOUNT: Always visible, strictly right-aligned */}
                     <td className={`px-4 sm:px-6 py-4 font-black text-right text-sm sm:text-base whitespace-nowrap align-top sm:align-middle ${t.type === 'Income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {t.type === 'Income' ? '+' : '-'}₱{Number(t.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
