@@ -7,13 +7,12 @@ import Link from "next/link";
 import { DashboardFilter } from "./DashboardFilter";
 import DashboardHelpButton from "./DashboardHelpButton"; 
 import LowStockWidget from "./LowStockWidget"; 
-import TablePagination from "@/components/TablePagination"; // THE FIX: Imported Pagination Component
-import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, PackageMinus, Target, Info } from "lucide-react"; 
+import TablePagination from "@/components/TablePagination"; 
+import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, TrendingDown, PackageMinus, Target, Info } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// THE FIX: Added 'page' to searchParams typing
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ month?: string, year?: string, page?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
@@ -75,7 +74,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const selectedMonth = params.month === 'all' ? 'all' : parseInt(params.month || String(now.getMonth() + 1));
   const selectedYear = parseInt(params.year || String(now.getFullYear()));
 
-  // THE FIX: Parse the current page for the Activity Widget
   const ITEMS_PER_PAGE = 5;
   const currentPage = parseInt(params.page || '1');
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -101,8 +99,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     periodLabel = `${monthNames[selectedMonth as number]} ${selectedYear}`;
   }
 
-  let totalCashInAllTime = 0; 
-  let totalExpensesAllTime = 0; 
+  // ============================================================================
+  // THE FIX: LOCKING THE NET CASH BALANCE TO "ALL TIME" ONLY
+  // ============================================================================
+  let totalCashAllTime = 0; 
+  let periodNetCashFlow = 0; 
+  
   let periodRevenue = 0; 
   let periodCogs = 0; 
   let periodExpenses = 0; 
@@ -113,27 +115,38 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   
   const recentActivity: any[] = [];
 
+  // PROCESS INCOME (CASH IN)
   (incomeData || []).forEach((inc) => {
     const amt = Number(inc.amount);
     const isEquity = (inc.accounts as any)?.type === 'equity';
-    totalCashInAllTime += amt; 
+    
+    // HARD LOCK: Always sum all cash regardless of filter
+    totalCashAllTime += amt; 
+    
     if (isInPeriod(inc.date)) {
+      periodNetCashFlow += amt; // Add cash that came in THIS MONTH to the flow badge
       periodTransactions++;
       recentActivity.push({ id: inc.id, type: isEquity ? "equity" : "income", amount: amt, date: inc.date, party: (inc.customers as any)?.name || (isEquity ? "Business Owner" : "Walk-in Customer"), description: inc.description || (isEquity ? "Capital Injection" : "Cash Receipt") });
       if (!isEquity) periodRevenue += amt; 
     }
   });
 
+  // PROCESS INVENTORY (COGS)
   (cogsData || []).forEach((mov) => {
     if (isInPeriod(mov.created_at)) {
       periodCogs += (Number(mov.quantity) * Number((mov.items as any)?.unit_cost || 0));
     }
   });
 
+  // PROCESS EXPENSES (CASH OUT)
   (expenseData || []).forEach((exp) => {
     const amt = Number(exp.amount);
-    totalExpensesAllTime += amt; 
+    
+    // HARD LOCK: Always subtract all expenses regardless of filter
+    totalCashAllTime -= amt; 
+    
     if (isInPeriod(exp.date)) {
+      periodNetCashFlow -= amt; // Subtract cash that left THIS MONTH from the flow badge
       periodExpenses += amt; 
       periodTransactions++;
       if ((exp.accounts as any)?.name?.toLowerCase().includes("tax")) periodTaxesPaid += amt;
@@ -148,13 +161,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     }
   });
 
-  const totalCashAllTime = totalCashInAllTime - totalExpensesAllTime; 
   const periodGrossProfit = periodRevenue - periodCogs; 
   const periodNetIncome = periodGrossProfit - periodExpenses; 
   
   recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  
-  // THE FIX: Slice the array based on the dynamic URL page parameter
   const totalActivityItems = recentActivity.length;
   const paginatedActivity = recentActivity.slice(startIndex, endIndex);
 
@@ -177,6 +187,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       </div>
 
+      {/* QUICK GUIDE */}
       <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5">
@@ -204,10 +215,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Wallet size={16} /></div>
               </CardHeader>
               <CardContent className="px-4 pb-4">
+                {/* THE FIX: Hard-locked to all-time bank balance */}
                 <div className={`text-3xl font-black tracking-tight break-words leading-none pb-1 ${totalCashAllTime < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
                   {formatCurrency(totalCashAllTime)}
                 </div>
-                <p className="text-[10px] text-neutral-400 mt-2 uppercase tracking-widest font-bold">ALL TIME</p>
+                <p className="text-[10px] text-neutral-400 mt-2 uppercase tracking-widest font-bold">
+                  CURRENT BANK BALANCE (ALL TIME)
+                </p>
+
+                {/* Secondary Indicator: Shows what moved strictly during the filtered month */}
+                <div className={`text-[11px] font-bold mt-3 inline-flex items-center gap-1.5 px-2 py-1 rounded-md shadow-sm border ${periodNetCashFlow >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                  {periodNetCashFlow >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  {periodNetCashFlow >= 0 ? '+' : ''}{formatCurrency(periodNetCashFlow)} {isDefaultState ? 'MTD Flow' : 'Flow'}
+                </div>
               </CardContent>
             </Card>
           </Link>
@@ -285,6 +305,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
+        {/* THE FIX: THE CLARIFIED NET INCOME CARD */}
         <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
             <div className="absolute top-0 left-0 w-full h-1 bg-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -298,6 +319,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </div>
               <p className="text-[10px] text-teal-700 mt-2 font-bold uppercase tracking-widest bg-teal-50 border border-teal-100 inline-block px-1.5 py-0.5 rounded break-words">
                 {periodLabel}
+              </p>
+              {/* THE FIX: Explicit UI explanation so the business owner knows what this number means */}
+              <p className="text-[10px] text-neutral-400 mt-1.5 font-medium leading-tight">
+                (Revenue - Cost of Goods - Expenses)
               </p>
             </CardContent>
           </Card>
@@ -379,9 +404,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
       )}
 
-      {/* ==============================================================================
-          THE UI FIX: Fluid List-Table With Implemented Pagination
-          ============================================================================== */}
       <div className="mt-8">
         <h3 className="text-base sm:text-lg font-semibold text-neutral-900 mb-4">Recent Activity ({periodLabel})</h3>
         
@@ -398,7 +420,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="text-right">Amount</div>
               </div>
 
-              {/* DATA ROWS: Uses paginatedActivity instead of top5Activity */}
               {paginatedActivity.map((activity) => (
                 <div key={`${activity.type}-${activity.id}`} className="relative grid grid-cols-1 sm:grid-cols-[5rem_1.5fr_2fr_8rem] lg:grid-cols-[6rem_1.5fr_2.5fr_8rem] gap-y-2.5 sm:gap-x-4 px-5 sm:px-6 py-4.5 sm:py-4 hover:bg-neutral-50 transition-colors items-start sm:items-center group">
                   
@@ -446,7 +467,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             </div>
           )}
 
-          {/* THE FIX: Injected the TablePagination Component */}
           <div className="border-t border-neutral-200 bg-neutral-50/50">
             <TablePagination 
               totalItems={totalActivityItems} 
