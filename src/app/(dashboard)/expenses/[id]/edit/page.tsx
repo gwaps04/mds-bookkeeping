@@ -9,12 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-// Import Lock icon for the disabled state
-import { ArrowLeft, Paperclip, Camera, Upload, Lock } from "lucide-react"; 
+import { ArrowLeft, Paperclip } from "lucide-react"; 
 import { redirect } from "next/navigation";
 
+// THE FIX: Import the new Client Component
+import ReceiptInput from "./ReceiptInput";
+
 export default async function EditExpensePage(props: { params: Promise<{ id: string }> }) {
-  // Await params for Next.js 15 compatibility
   const params = await props.params;
   const { id } = params;
 
@@ -45,29 +46,22 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
   const isSuperAdmin = profile?.role === 'super_admin';
   const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
 
-  // Key 2 (User Scope): If the user is a staff member WITHOUT explicit Expenses clearance, kick them out.
   if (!isOwner && profile?.can_access_expenses !== true) {
     redirect("/dashboard");
   }
   // ============================================================================
 
-  // Evaluates to true UNLESS explicitly set to false by the Super Admin
   const canUploadReceipts = bizData?.allow_receipt_uploads !== false; 
 
-  // 2. Fetch the specific Expense Record (Ensure it belongs to this business)
+  // 2. Fetch the specific Expense Record
   const { data: expense } = await supabase
     .from("expenses")
-    .select(`
-      *,
-      vendors (name)
-    `)
+    .select(`*, vendors (name)`)
     .eq("id", id)
     .eq("business_id", businessId)
     .single();
 
-  if (!expense) {
-    redirect("/expenses"); // If it doesn't exist or isn't theirs, kick them out
-  }
+  if (!expense) redirect("/expenses"); 
 
   // 3. Fetch Accounts for dropdowns
   const { data: accounts } = await supabase
@@ -103,7 +97,6 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
             await updateExpense(formData);
           }} className="space-y-5">
             
-            {/* HIDDEN ID FIELD: Required for the backend to know which row to update */}
             <input type="hidden" name="id" value={expense.id} />
 
             <div className="space-y-1.5">
@@ -191,11 +184,10 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
             </div>
 
             {/* ============================================================================ */}
-            {/* THE RECEIPT MANAGEMENT & SAAS GATEKEEPER ZONE */}
+            {/* THE RECEIPT MANAGEMENT ZONE */}
             {/* ============================================================================ */}
             <div className="pt-2 border-t border-neutral-100">
               
-              {/* NOTE: We still allow them to view an OLD receipt even if the feature gets locked later. */}
               {expense.receipt_url && (
                 <div className="mb-4 p-3 bg-neutral-50 rounded-lg border border-neutral-200 flex items-center justify-between">
                   <div>
@@ -213,62 +205,12 @@ export default async function EditExpensePage(props: { params: Promise<{ id: str
                 </div>
               )}
 
-              {canUploadReceipts ? (
-                /* ACTIVE SCANNER UI */
-                <div className="space-y-3 p-4 bg-blue-50/50 rounded-lg border-2 border-blue-100 border-dashed relative group overflow-hidden transition-colors hover:bg-blue-50 hover:border-blue-300">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-white border border-blue-200 rounded text-blue-600 shadow-sm">
-                      <Camera size={14} className="md:hidden" />
-                      <Upload size={14} className="hidden md:block" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
-                    </div>
-                    <Label htmlFor="receipt" className="text-neutral-700 font-semibold cursor-pointer">
-                      {expense.receipt_url ? "Replace Receipt (Optional)" : "Attach Receipt (Optional)"}
-                    </Label>
-                  </div>
-                  
-                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 md:hidden">
-                    Tap below to open your camera and scan a receipt. {expense.receipt_url ? "This will overwrite the current file." : ""}
-                  </p>
-                  <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 hidden md:block">
-                    Click below to select a scanned image or PDF. {expense.receipt_url ? "This will overwrite the current file." : ""}
-                  </p>
-                  
-                  {/* STRICT MIME TYPES ENFORCED */}
-                  <Input 
-                    id="receipt" 
-                    name="receipt" 
-                    type="file" 
-                    accept="image/jpeg, image/png, application/pdf" 
-                    className="cursor-pointer file:text-blue-700 file:font-semibold file:bg-white file:border file:border-blue-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 file:hover:bg-blue-50 file:transition-colors file:shadow-sm text-neutral-500 text-xs bg-transparent border-0 p-0 h-auto w-full" 
-                  />
-                </div>
-              ) : (
-                /* DISABLED / LOCKED SCANNER UI */
-                <div className="space-y-3 p-4 bg-neutral-50 rounded-lg border-2 border-neutral-200 border-dashed relative overflow-hidden opacity-80 select-none grayscale">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-neutral-200 border border-neutral-300 rounded text-neutral-500 shadow-sm">
-                      <Lock size={14} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Locked</span>
-                    </div>
-                    <Label className="text-neutral-500 font-semibold flex items-center gap-1.5 cursor-not-allowed">
-                      Attach Receipt (Premium)
-                    </Label>
-                  </div>
-                  
-                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
-                    This feature is disabled. Upgrade your account tier to unlock digital document storage and mobile scanning.
-                  </p>
-                  
-                  {/* EXPLICITLY DISABLED INPUT to bypass Form Payload */}
-                  <Input 
-                    type="file" 
-                    disabled
-                    className="cursor-not-allowed file:text-neutral-400 file:font-semibold file:bg-neutral-100 file:border file:border-neutral-200 file:rounded-md file:px-4 file:py-1.5 file:mr-4 text-neutral-400 text-xs bg-transparent border-0 p-0 h-auto w-full" 
-                  />
-                </div>
-              )}
+              {/* THE FIX: Replaced the static HTML with our intelligent Client Component */}
+              <ReceiptInput 
+                isLocked={!canUploadReceipts} 
+                hasExistingReceipt={!!expense.receipt_url} 
+              />
+              
             </div>
             {/* ============================================================================ */}
 

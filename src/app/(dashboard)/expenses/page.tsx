@@ -1,6 +1,6 @@
 // src/app/(dashboard)/expenses/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation"; // THE FIX: Imported redirect for the Hard Guard
+import { redirect } from "next/navigation";
 import { createExpense } from "@/features/expenses/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,12 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import Link from "next/link";
 import SubmitButton from "@/components/SubmitButton";
-import { Paperclip, Camera, Upload, Lock, CreditCard } from "lucide-react"; 
+import { Paperclip, Lock, CreditCard } from "lucide-react"; 
 
 import { ExpenseEditInterceptor, ExpenseDeleteDialog } from "./ExpenseActionDialogs";
 import { getTenantAccessLevel } from "@/lib/subscription";
-
 import TablePagination from "@/components/TablePagination"; 
+
+// THE FIX: Import the new Client Component
+import ReceiptInput from "./ReceiptInput";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -30,7 +32,7 @@ export default async function ExpensesPage(props: {
   if (!user) redirect("/login");
 
   // ============================================================================
-  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags for Expenses
+  // THE GATEKEEPER: Get Profile, RBAC Flags & Business Features
   // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
@@ -52,8 +54,6 @@ export default async function ExpensesPage(props: {
   const isSuperAdmin = profile?.role === 'super_admin';
   const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
   
-  // Key 1 (Business Scope): Expenses is a core module, so we assume the business always has access to it.
-  // Key 2 (User Scope): If the user is a staff member WITHOUT explicit Expenses clearance, kick them out.
   if (!isOwner && profile?.can_access_expenses !== true) {
     redirect("/dashboard");
   }
@@ -205,58 +205,13 @@ export default async function ExpensesPage(props: {
                   <Input id="reference_number" name="reference_number" placeholder="e.g. Receipt No." disabled={isLocked} className="w-full focus-visible:ring-neutral-900" />
                 </div>
 
-                <div className="space-y-1.5 w-full">
+                <div className="space-y-1.5 w-full mb-2">
                   <Label htmlFor="description" className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Notes / Details</Label>
                   <Textarea id="description" name="description" placeholder="What was this for?" className="w-full resize-none h-16 focus-visible:ring-neutral-900" required disabled={isLocked} />
                 </div>
 
-                {canUploadReceipts ? (
-                  <div className={`space-y-3 p-4 rounded-lg border-2 border-dashed relative group overflow-hidden transition-colors w-full ${isLocked ? 'bg-neutral-50 border-neutral-200' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50 hover:border-blue-300'}`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={`flex items-center gap-1.5 px-2 py-1 bg-white border rounded shadow-sm ${isLocked ? 'text-neutral-400 border-neutral-200' : 'text-blue-600 border-blue-200'}`}>
-                        <Camera size={14} className="md:hidden" />
-                        <Upload size={14} className="hidden md:block" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider md:hidden">Scanner</span>
-                        <span className="text-[10px] font-bold uppercase tracking-wider hidden md:block">Upload</span>
-                      </div>
-                      <Label htmlFor="receipt" className={`font-semibold text-xs sm:text-sm ${isLocked ? 'text-neutral-400' : 'text-neutral-700 cursor-pointer'}`}>
-                        Attach Receipt
-                      </Label>
-                    </div>
-                    
-                    <p className="text-[10px] sm:text-[11px] text-neutral-500 leading-relaxed mb-3 md:hidden">
-                      Tap the button below to open your camera and scan a receipt.
-                    </p>
-                    <p className="text-[10px] sm:text-[11px] text-neutral-500 leading-relaxed mb-3 hidden md:block">
-                      Click below to select a scanned image or PDF from your computer.
-                    </p>
-                    
-                    <Input 
-                      id="receipt" 
-                      name="receipt" 
-                      type="file" 
-                      accept="image/jpeg, image/png, application/pdf" 
-                      disabled={isLocked}
-                      className={`file:font-semibold file:bg-white file:border file:rounded-md file:px-3 file:py-1.5 file:mr-3 file:transition-colors file:shadow-sm text-[10px] sm:text-xs bg-transparent border-0 p-0 h-auto w-full ${isLocked ? 'cursor-not-allowed file:text-neutral-400 file:border-neutral-200 text-neutral-400' : 'cursor-pointer file:text-blue-700 file:border-blue-200 file:hover:bg-blue-50 text-neutral-500'}`} 
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-3 p-4 bg-neutral-50 rounded-lg border border-neutral-200 relative overflow-hidden flex flex-col items-center text-center w-full">
-                    <div className="absolute top-0 right-0 p-3 opacity-5 text-4xl pointer-events-none">🔒</div>
-                    <div className="p-2 bg-neutral-200 text-neutral-500 rounded-full mb-1">
-                      <Camera size={18} />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-neutral-900">Receipt Scanning Locked</h4>
-                      <p className="text-[10px] sm:text-[11px] text-neutral-500 leading-relaxed mt-1 max-w-[200px] mx-auto">
-                        Digital document storage and mobile scanning are available on Premium plans.
-                      </p>
-                    </div>
-                    <Button type="button" disabled variant="outline" size="sm" className="h-7 text-[10px] border-indigo-200 text-indigo-700 bg-indigo-50 mt-1 cursor-not-allowed">
-                      Upgrade to Unlock
-                    </Button>
-                  </div>
-                )}
+                {/* THE FIX: Replaced massive inline conditional with clean Client Component */}
+                <ReceiptInput isLocked={isLocked || !canUploadReceipts} />
 
                 <div className="pt-2 w-full">
                   {isLocked ? (

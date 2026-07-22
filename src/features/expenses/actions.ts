@@ -5,8 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logSecurityEvent } from "@/lib/audit";
-
-// THE FIX: Import the Centralized API Defense Guard
 import { verifyActiveSubscription } from "@/lib/subscription";
 
 // ============================================================================
@@ -55,22 +53,39 @@ export async function createExpense(formData: FormData) {
     }
   }
 
-  // BINARY STORAGE ENGINE
+  // ============================================================================
+  // THE FIX: SOFT-FAIL BINARY STORAGE ENGINE
+  // ============================================================================
   let receipt_url = null;
   if (receiptFile && receiptFile.size > 0 && receiptFile.name !== "undefined") {
-    const fileExt = receiptFile.name.split('.').pop();
-    const fileName = `${business_id}/${crypto.randomUUID()}.${fileExt}`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("receipts")
-      .upload(fileName, receiptFile);
+    try {
+      // 1. Handle missing extensions gracefully
+      const fileExt = receiptFile.name.includes('.') ? receiptFile.name.split('.').pop() : 'jpg';
+      const fileName = `${business_id}/${crypto.randomUUID()}.${fileExt}`;
       
-    if (!uploadError && uploadData) {
-      const { data: publicUrlData } = supabase.storage
+      // 2. Convert to ArrayBuffer to prevent Node/Next.js serialization crashes
+      const fileBuffer = await receiptFile.arrayBuffer();
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from("receipts")
-        .getPublicUrl(fileName);
+        .upload(fileName, fileBuffer, {
+          contentType: receiptFile.type || 'image/jpeg',
+          upsert: false
+        });
         
-      receipt_url = publicUrlData.publicUrl;
+      if (!uploadError && uploadData) {
+        const { data: publicUrlData } = supabase.storage
+          .from("receipts")
+          .getPublicUrl(fileName);
+          
+        receipt_url = publicUrlData.publicUrl;
+      } else {
+        console.error("Supabase Storage Error:", uploadError);
+      }
+    } catch (storageError) {
+      console.error("Receipt upload soft-failed:", storageError);
+      // We intentionally do NOT throw here. 
+      // If the image fails due to Vercel limits, we still want to save the ledger data!
     }
   }
 
@@ -158,22 +173,33 @@ export async function updateExpense(formData: FormData) {
     }
   }
 
-  // BINARY STORAGE ENGINE
+  // ============================================================================
+  // THE FIX: SOFT-FAIL BINARY STORAGE ENGINE
+  // ============================================================================
   let receipt_url = oldRecord?.receipt_url;
   if (receiptFile && receiptFile.size > 0 && receiptFile.name !== "undefined") {
-    const fileExt = receiptFile.name.split('.').pop();
-    const fileName = `${business_id}/${crypto.randomUUID()}.${fileExt}`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("receipts")
-      .upload(fileName, receiptFile);
+    try {
+      const fileExt = receiptFile.name.includes('.') ? receiptFile.name.split('.').pop() : 'jpg';
+      const fileName = `${business_id}/${crypto.randomUUID()}.${fileExt}`;
       
-    if (!uploadError && uploadData) {
-      const { data: publicUrlData } = supabase.storage
+      const fileBuffer = await receiptFile.arrayBuffer();
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from("receipts")
-        .getPublicUrl(fileName);
+        .upload(fileName, fileBuffer, {
+          contentType: receiptFile.type || 'image/jpeg',
+          upsert: false
+        });
         
-      receipt_url = publicUrlData.publicUrl;
+      if (!uploadError && uploadData) {
+        const { data: publicUrlData } = supabase.storage
+          .from("receipts")
+          .getPublicUrl(fileName);
+          
+        receipt_url = publicUrlData.publicUrl;
+      }
+    } catch (storageError) {
+      console.error("Receipt upload soft-failed:", storageError);
     }
   }
 
