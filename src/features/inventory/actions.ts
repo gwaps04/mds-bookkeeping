@@ -205,3 +205,45 @@ export async function getItemHistory(itemId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+
+// ============================================================================
+// 6. REVERSE STOCK MOVEMENT (Contra Entry)
+// ============================================================================
+export async function reverseStockMovement(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const businessId = await verifyInventoryAccess(supabase, user.id);
+  const movementId = formData.get("movement_id") as string;
+
+  // 1. Fetch the exact original movement to ensure accurate reversal
+  const { data: original, error: fetchErr } = await supabase
+    .from("stock_movements")
+    .select("*")
+    .eq("id", movementId)
+    .eq("business_id", businessId)
+    .single();
+
+  if (fetchErr || !original) throw new Error("Original movement not found.");
+
+  // 2. Calculate the inverse action (The Contra Entry)
+  let contraType = 'STOCK_IN'; // Default fallback
+  if (original.type === 'STOCK_IN') contraType = 'STOCK_OUT';
+  else if (original.type === 'STOCK_OUT' || original.type === 'SALE') contraType = 'STOCK_IN';
+
+  // 3. Post the correcting entry to the ledger
+  const { error: insertErr } = await supabase.from("stock_movements").insert({
+    business_id: businessId,
+    item_id: original.item_id,
+    type: contraType,
+    quantity: original.quantity, // We duplicate the exact quantity, the 'contraType' handles the math
+    notes: `SYSTEM REVERSAL: Correction for movement on ${new Date(original.created_at).toLocaleString()}`,
+    created_by: user.id,
+    reference_type: 'REVERSAL',
+    reference_id: original.id
+  });
+
+  if (insertErr) throw new Error(insertErr.message);
+  revalidatePath("/inventory");
+}

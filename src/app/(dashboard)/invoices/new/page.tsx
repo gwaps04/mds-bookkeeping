@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import InvoiceForm from "./InvoiceForm";
 import Link from "next/link";
 
-// THE FIX: Import the SaaS Engine and the Redirect utility
+// The SaaS Engine and the Redirect utility
 import { getTenantAccessLevel } from "@/lib/subscription";
 import { redirect } from "next/navigation";
 
@@ -19,7 +19,7 @@ export default async function NewInvoicePage() {
     .single();
 
   // ============================================================================
-  // INJECT THIS ROUTE GUARD BEFORE RENDERING THE PAGE
+  // SUBSCRIPTION ROUTE GUARD
   // ============================================================================
   const { data: business } = await supabase
     .from("businesses")
@@ -43,28 +43,28 @@ export default async function NewInvoicePage() {
     .order("name");
 
   // ============================================================================
-  // THE FIX: Sort by system timestamp (created_at) DESC instead of alphabetically
+  // THE FIX: Explicitly select type, quantity_on_hand, and reorder_threshold
   // ============================================================================
   const { data: inventoryItems } = await supabase
     .from("items")
-    .select("id, name, selling_price")
+    .select("id, name, type, selling_price, quantity_on_hand, reorder_threshold") 
     .eq("business_id", profile?.business_id)
-    .eq("is_archived", false) // Ensures deleted items don't show up in the dropdown
+    .eq("is_archived", false) 
     .in("type", ["SELLABLE_SIMPLE", "SELLABLE_COMPOSITE"])
-    .order("created_at", { ascending: false }); // <--- CHANGED FROM "name"
+    .order("created_at", { ascending: false }); 
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center gap-4">
-        <Link href="/invoices" className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors bg-white px-3 py-1.5 rounded-md border border-neutral-200 shadow-sm">
+    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full min-w-0">
+      <div className="flex items-center gap-4 w-full min-w-0">
+        <Link href="/invoices" className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors bg-white px-3 py-1.5 rounded-md border border-neutral-200 shadow-sm shrink-0">
           &larr; Cancel
         </Link>
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-neutral-900">Create New Invoice</h2>
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold tracking-tight text-neutral-900 truncate">Create New Invoice</h2>
         </div>
       </div>
 
-      {/* Pass BOTH customers and inventory items to the form */}
+      {/* Pass BOTH customers and the FULLY HYDRATED inventory items to the form */}
       <InvoiceForm customers={customers || []} inventoryItems={inventoryItems || []} />
     </div>
   );
