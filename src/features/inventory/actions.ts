@@ -47,7 +47,6 @@ export async function createItem(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // THE FIX: Enforce the gatekeeper
   const businessId = await verifyInventoryAccess(supabase, user.id);
   
   const name = formData.get("name") as string;
@@ -104,7 +103,6 @@ export async function recordStockMovement(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // THE FIX: Enforce the gatekeeper
   const businessId = await verifyInventoryAccess(supabase, user.id);
 
   const itemId = formData.get("item_id") as string;
@@ -136,7 +134,6 @@ export async function updateItem(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // THE FIX: Enforce the gatekeeper
   const businessId = await verifyInventoryAccess(supabase, user.id);
   
   const id = formData.get("id") as string;
@@ -169,7 +166,6 @@ export async function archiveItem(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // THE FIX: Enforce the gatekeeper
   const businessId = await verifyInventoryAccess(supabase, user.id);
   const id = formData.get("id") as string;
 
@@ -180,4 +176,32 @@ export async function archiveItem(formData: FormData) {
 
   if (error) throw new Error(error.message);
   revalidatePath("/inventory");
+}
+
+// ============================================================================
+// 5. FETCH ITEM HISTORY (The Stock Card / Audit Trail)
+// ============================================================================
+export async function getItemHistory(itemId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const businessId = await verifyInventoryAccess(supabase, user.id);
+
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select(`
+      id,
+      type,
+      quantity,
+      notes,
+      reference_type,
+      created_at
+    `)
+    .eq("business_id", businessId)
+    .eq("item_id", itemId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data;
 }

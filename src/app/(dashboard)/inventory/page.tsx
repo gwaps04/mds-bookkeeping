@@ -1,6 +1,6 @@
 // src/app/(dashboard)/inventory/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation"; // THE FIX: Imported redirect for the Hard Guard
+import { redirect } from "next/navigation"; 
 import ItemRowActions from "@/features/inventory/components/ItemRowActions"; 
 import AddItemForm from "@/features/inventory/components/AddItemForm"; 
 import LogStockMovementForm from "@/features/inventory/components/LogStockMovementForm"; 
@@ -34,7 +34,7 @@ export default async function InventoryPage(props: {
   if (!user) redirect("/login");
 
   // ============================================================================
-  // THE FIX: Upgraded query to fetch the Two-Key RBAC flags for Inventory
+  // UPGRADED QUERY: Fetch the Two-Key RBAC flags for Inventory
   // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
@@ -70,11 +70,11 @@ export default async function InventoryPage(props: {
   // ============================================================================
 
   // ============================================================================
-  // THE FORM QUERY
+  // THE FORM QUERY (THE FIX: Added unit_cost to the select statement)
   // ============================================================================
   const { data: formItems } = await supabase
     .from("items")
-    .select("id, name, type, quantity_on_hand, unit_of_measure")
+    .select("id, name, type, quantity_on_hand, unit_of_measure, unit_cost")
     .eq("business_id", businessId)
     .eq("is_archived", false);
 
