@@ -1,4 +1,4 @@
-// src/app/(dashboard)/inventory/page.tsx
+// src/app/(dashboard)/reports/inventory/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { redirect } from "next/navigation";
@@ -8,7 +8,7 @@ import AddItemForm from "@/features/inventory/components/AddItemForm";
 import LogStockMovementForm from "@/features/inventory/components/LogStockMovementForm";
 import ItemRowActions from "@/features/inventory/components/ItemRowActions";
 
-// THE FIX: Explicitly disable Next.js aggressive caching for this route.
+// Explicitly disable Next.js aggressive caching for this route.
 // This ensures that when the Server Action revalidates, this page instantly fetches fresh data.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -192,9 +192,9 @@ export default async function InventoryPage() {
                               )}
                             </td>
                             
-                            {/* ACTIONS (Using the Client Component Modal you provided) */}
+                            {/* THE FIX: Fulfilling the TypeScript Contract! */}
                             <td className="px-4 sm:px-6 py-4 text-center align-middle">
-                              <ItemRowActions item={item} />
+                              <ItemRowActions item={item} rawMaterials={rawMaterials} />
                             </td>
 
                           </tr>
