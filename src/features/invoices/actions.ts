@@ -8,7 +8,7 @@ import { logSecurityEvent } from "@/lib/audit";
 import { verifyActiveSubscription } from "@/lib/subscription";
 
 // ============================================================================
-// 1. CREATE INVOICE & AUTO-DEDUCT STOCK (WITH RECIPES)
+// 1. CREATE INVOICE & AUTO-DEDUCT STOCK (WITH COST SNAPSHOTTING)
 // ============================================================================
 export async function createOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
@@ -41,7 +41,6 @@ export async function createOfficialInvoice(formData: FormData) {
 
   const displayId = invoice.id.split('-')[0].toUpperCase();
 
-  // 1. Insert Invoice Items
   const formattedItems = items.map((item: any) => ({
     invoice_id: invoice.id,
     item_id: item.item_id || null, 
@@ -54,7 +53,7 @@ export async function createOfficialInvoice(formData: FormData) {
   const { error: itemsError } = await supabase.from("invoice_items").insert(formattedItems);
   if (itemsError) throw new Error(itemsError.message);
 
-  // --- THE FIX FOR MADE-TO-ORDER COMPOSITES ---
+  // --- THE COMPOSITE FIX ---
   const compositeItemIds = items.filter((i: any) => i.item_id).map((i: any) => i.item_id);
   let recipes: any[] = [];
   
@@ -62,10 +61,20 @@ export async function createOfficialInvoice(formData: FormData) {
     const { data: fetchedRecipes } = await supabase.from("recipe_ingredients").select("*").in("composite_item_id", compositeItemIds);
     if (fetchedRecipes) recipes = fetchedRecipes;
   }
-
   const itemsWithRecipes = recipes.map(r => r.composite_item_id);
 
-  // 2. INVENTORY LEDGER: Base Deductions (Only deduct items that DO NOT have recipes)
+  // --- THE FIX: PRE-FETCH LIVE COSTS FOR SNAPSHOTTING ---
+  const directItemIds = items.filter((i: any) => i.item_id && !itemsWithRecipes.includes(i.item_id)).map((i: any) => i.item_id);
+  const rawMaterialIds = recipes.map(r => r.raw_material_item_id);
+  const allItemIdsToFetch = [...new Set([...directItemIds, ...rawMaterialIds])];
+  
+  const itemCosts: Record<string, number> = {};
+  if (allItemIdsToFetch.length > 0) {
+    const { data: liveItems } = await supabase.from("items").select("id, unit_cost").in("id", allItemIdsToFetch);
+    liveItems?.forEach(li => { itemCosts[li.id] = li.unit_cost || 0; });
+  }
+
+  // 2. INVENTORY LEDGER: Base Deductions
   const stockMovements: any[] = items
     .filter((item: any) => item.item_id && !itemsWithRecipes.includes(item.item_id)) 
     .map((item: any) => ({
@@ -73,13 +82,14 @@ export async function createOfficialInvoice(formData: FormData) {
       item_id: item.item_id,
       type: 'STOCK_OUT',
       quantity: item.quantity,
+      unit_cost: itemCosts[item.item_id] || 0, // <--- SNAPSHOT INJECTED
       reference_id: invoice.id,
       reference_type: 'INVOICE',
       created_by: user.id,
       notes: `Auto-deducted for Invoice #${displayId}`
     }));
 
-  // 3. RECIPE ENGINE: Deduct ONLY the RAW MATERIALS for composite items
+  // 3. RECIPE ENGINE: Deduct RAW MATERIALS
   if (recipes.length > 0) {
     items.forEach((item: any) => {
       const itemRecipes = recipes.filter((r: any) => r.composite_item_id === item.item_id);
@@ -88,7 +98,8 @@ export async function createOfficialInvoice(formData: FormData) {
           business_id: businessId,
           item_id: recipe.raw_material_item_id,
           type: 'STOCK_OUT',
-          quantity: recipe.quantity_required * item.quantity, // Recipe requirement * Qty sold
+          quantity: recipe.quantity_required * item.quantity, 
+          unit_cost: itemCosts[recipe.raw_material_item_id] || 0, // <--- SNAPSHOT INJECTED
           reference_id: invoice.id,
           reference_type: 'RECIPE_DEDUCTION',
           created_by: user.id,
@@ -98,7 +109,6 @@ export async function createOfficialInvoice(formData: FormData) {
     });
   }
 
-  // Execute all stock deductions instantly
   if (stockMovements.length > 0) {
     await supabase.from("stock_movements").insert(stockMovements); 
   }
@@ -114,7 +124,7 @@ export async function createOfficialInvoice(formData: FormData) {
 }
 
 // ============================================================================
-// 2. UPDATE INVOICE & RECONCILE STOCK (WITH RECIPES)
+// 2. UPDATE INVOICE & RECONCILE STOCK (WITH COST SNAPSHOTTING)
 // ============================================================================
 export async function updateOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
@@ -137,9 +147,9 @@ export async function updateOfficialInvoice(formData: FormData) {
   const displayId = id.split('-')[0].toUpperCase();
   const totalAmount = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unit_price), 0);
 
-  // 1. INVENTORY LEDGER: Safely REVERT old stock using the exact historical stock movements!
+  // 1. INVENTORY LEDGER: Safely REVERT old stock using HISTORICAL COSTS!
   const { data: oldMovements } = await supabase.from("stock_movements")
-    .select("item_id, quantity")
+    .select("item_id, quantity, unit_cost") // <--- THE FIX: Fetch historical cost
     .eq("reference_id", id)
     .eq("type", "STOCK_OUT"); 
 
@@ -149,6 +159,7 @@ export async function updateOfficialInvoice(formData: FormData) {
       item_id: mov.item_id, 
       type: 'STOCK_IN', 
       quantity: mov.quantity, 
+      unit_cost: mov.unit_cost, // <--- THE FIX: Restore using the exact historical cost
       reference_id: id, 
       reference_type: 'INVOICE_EDIT', 
       created_by: user.id, 
@@ -171,7 +182,7 @@ export async function updateOfficialInvoice(formData: FormData) {
   const { error: itemsError } = await supabase.from("invoice_items").insert(formattedItems); 
   if (itemsError) throw new Error(itemsError.message);
 
-  // --- THE FIX FOR MADE-TO-ORDER COMPOSITES (DURING EDIT) ---
+  // --- THE COMPOSITE FIX ---
   const compositeItemIds = items.filter((i: any) => i.item_id).map((i: any) => i.item_id);
   let recipes: any[] = [];
   
@@ -179,23 +190,49 @@ export async function updateOfficialInvoice(formData: FormData) {
     const { data: fetchedRecipes } = await supabase.from("recipe_ingredients").select("*").in("composite_item_id", compositeItemIds);
     if (fetchedRecipes) recipes = fetchedRecipes;
   }
-
   const itemsWithRecipes = recipes.map(r => r.composite_item_id);
 
-  // 4. INVENTORY LEDGER: Base Deductions (Only deduct items that DO NOT have recipes)
+  // --- THE FIX: PRE-FETCH LIVE COSTS FOR NEW DEDUCTIONS ---
+  const directItemIds = items.filter((i: any) => i.item_id && !itemsWithRecipes.includes(i.item_id)).map((i: any) => i.item_id);
+  const rawMaterialIds = recipes.map(r => r.raw_material_item_id);
+  const allItemIdsToFetch = [...new Set([...directItemIds, ...rawMaterialIds])];
+  
+  const itemCosts: Record<string, number> = {};
+  if (allItemIdsToFetch.length > 0) {
+    const { data: liveItems } = await supabase.from("items").select("id, unit_cost").in("id", allItemIdsToFetch);
+    liveItems?.forEach(li => { itemCosts[li.id] = li.unit_cost || 0; });
+  }
+
+  // 4. INVENTORY LEDGER: Base Deductions
   const stockDeductions: any[] = items
     .filter((i: any) => i.item_id && !itemsWithRecipes.includes(i.item_id))
     .map((i: any) => ({
-      business_id: businessId, item_id: i.item_id, type: 'STOCK_OUT', quantity: i.quantity, reference_id: id, reference_type: 'INVOICE_EDIT', created_by: user.id, notes: `Auto-deducted from edit of Invoice #${displayId}`
+      business_id: businessId, 
+      item_id: i.item_id, 
+      type: 'STOCK_OUT', 
+      quantity: i.quantity, 
+      unit_cost: itemCosts[i.item_id] || 0, // <--- SNAPSHOT INJECTED
+      reference_id: id, 
+      reference_type: 'INVOICE_EDIT', 
+      created_by: user.id, 
+      notes: `Auto-deducted from edit of Invoice #${displayId}`
     }));
 
-  // 5. RECIPE ENGINE: Deduct ONLY the RAW MATERIALS for composite items
+  // 5. RECIPE ENGINE: Deduct RAW MATERIALS
   if (recipes.length > 0) {
     items.forEach((item: any) => {
       const itemRecipes = recipes.filter((r: any) => r.composite_item_id === item.item_id);
       itemRecipes.forEach((recipe: any) => {
         stockDeductions.push({
-          business_id: businessId, item_id: recipe.raw_material_item_id, type: 'STOCK_OUT', quantity: recipe.quantity_required * item.quantity, reference_id: id, reference_type: 'RECIPE_DEDUCTION', created_by: user.id, notes: `Recipe deduction for ${item.description} (Invoice #${displayId})`
+          business_id: businessId, 
+          item_id: recipe.raw_material_item_id, 
+          type: 'STOCK_OUT', 
+          quantity: recipe.quantity_required * item.quantity, 
+          unit_cost: itemCosts[recipe.raw_material_item_id] || 0, // <--- SNAPSHOT INJECTED
+          reference_id: id, 
+          reference_type: 'RECIPE_DEDUCTION', 
+          created_by: user.id, 
+          notes: `Recipe deduction for ${item.description} (Invoice #${displayId})`
         });
       });
     });
@@ -215,7 +252,7 @@ export async function updateOfficialInvoice(formData: FormData) {
 }
 
 // ============================================================================
-// 3. DELETE INVOICE & RESTORE STOCK (WITH RECIPES)
+// 3. DELETE INVOICE & RESTORE STOCK (WITH COST SNAPSHOTTING)
 // ============================================================================
 export async function deleteOfficialInvoice(formData: FormData) {
   const supabase = await createClient();
@@ -233,9 +270,9 @@ export async function deleteOfficialInvoice(formData: FormData) {
   const { data: targetRecord } = await supabase.from("invoices").select("*").eq("id", id).single();
   const displayId = id.split('-')[0].toUpperCase();
 
-  // 1. INVENTORY LEDGER: Safely RESTORE old stock using the exact historical stock movements!
+  // 1. INVENTORY LEDGER: Safely RESTORE old stock using HISTORICAL COSTS!
   const { data: oldMovements } = await supabase.from("stock_movements")
-    .select("item_id, quantity")
+    .select("item_id, quantity, unit_cost") // <--- THE FIX: Fetch historical cost
     .eq("reference_id", id)
     .eq("type", "STOCK_OUT"); 
 
@@ -245,6 +282,7 @@ export async function deleteOfficialInvoice(formData: FormData) {
       item_id: mov.item_id, 
       type: 'STOCK_IN', 
       quantity: mov.quantity, 
+      unit_cost: mov.unit_cost, // <--- THE FIX: Restore using exact historical cost
       reference_id: id, 
       reference_type: 'INVOICE_VOID', 
       created_by: user.id, 

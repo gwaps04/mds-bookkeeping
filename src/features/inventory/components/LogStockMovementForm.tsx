@@ -1,27 +1,37 @@
 // src/features/inventory/components/LogStockMovementForm.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { recordStockMovement } from "@/features/inventory/actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import SubmitButton from "@/components/SubmitButton"; // THE FIX: Imported Native Submit Button
+import SubmitButton from "@/components/SubmitButton";
 
 export default function LogStockMovementForm({ items }: { items: any[] }) {
   const formRef = useRef<HTMLFormElement>(null);
   
-  // We control the select states manually to clear them on success
   const [movementType, setMovementType] = useState("STOCK_IN");
   const [selectedItem, setSelectedItem] = useState("");
+  const [currentUnitCost, setCurrentUnitCost] = useState<number | string>("");
+
+  useEffect(() => {
+    if (selectedItem) {
+      const item = items.find(i => i.id === selectedItem);
+      // THE FIX: Force exactly 2 decimal places to satisfy HTML5 input step validations
+      if (item) setCurrentUnitCost(Number(item.unit_cost || 0).toFixed(2));
+    } else {
+      setCurrentUnitCost("");
+    }
+  }, [selectedItem, items]);
 
   const handleSubmit = async (formData: FormData) => {
     try {
       await recordStockMovement(formData);
-      // Instantly reset the form!
       formRef.current?.reset();
       setMovementType("STOCK_IN");
       setSelectedItem("");
+      setCurrentUnitCost("");
     } catch (error: any) {
       alert(error.message);
     }
@@ -50,9 +60,29 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
         </Select>
       </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Quantity</Label>
-        <Input name="quantity" type="number" step="0.01" min="0.01" required placeholder="0" className="focus-visible:ring-blue-600" />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Quantity</Label>
+          <Input name="quantity" type="number" step="0.01" min="0.01" required placeholder="0" className="focus-visible:ring-blue-600 font-bold text-blue-700 bg-blue-50" />
+        </div>
+
+        {movementType === 'STOCK_IN' && (
+          <div className="space-y-1.5 animate-in fade-in slide-in-from-right-2 duration-300">
+            <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Purchase Price</Label>
+            <Input 
+              name="unit_cost" 
+              type="number" 
+              step="0.01" 
+              min="0" 
+              required 
+              value={currentUnitCost}
+              onChange={(e) => setCurrentUnitCost(e.target.value)}
+              placeholder="0.00" 
+              className="focus-visible:ring-emerald-600 font-mono" 
+              title="The price paid per unit for this specific delivery."
+            />
+          </div>
+        )}
       </div>
 
       <div className="space-y-1.5 pb-2">

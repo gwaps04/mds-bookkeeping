@@ -22,7 +22,6 @@ export default async function InventoryPage(props: {
   const params = await props.searchParams;
   const searchStr = params?.search?.toLowerCase() || '';
 
-  // PAGINATION SETUP
   const ITEMS_PER_PAGE = 50;
   const currentPage = parseInt(params?.page || '1');
   const from = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -33,9 +32,6 @@ export default async function InventoryPage(props: {
 
   if (!user) redirect("/login");
 
-  // ============================================================================
-  // UPGRADED QUERY: Fetch the Two-Key RBAC flags for Inventory
-  // ============================================================================
   const { data: profile } = await supabase
     .from("profiles")
     .select(`
@@ -51,36 +47,19 @@ export default async function InventoryPage(props: {
   const bizData = Array.isArray(profile?.businesses) ? profile.businesses[0] : profile?.businesses;
   const currency = bizData?.currency || "PHP";
 
-  // ============================================================================
-  // THE HARD GUARD: SERVER-SIDE ROUTE PROTECTION
-  // ============================================================================
   const isSuperAdmin = profile?.role === 'super_admin';
   const isOwner = profile?.role === 'business_owner' || isSuperAdmin;
   const bizHasInventory = bizData?.has_inventory_access === true;
 
-  // Key 1: If the business doesn't pay for the module, kick EVERYONE out.
-  if (!bizHasInventory && !isSuperAdmin) {
-    redirect("/dashboard");
-  }
+  if (!bizHasInventory && !isSuperAdmin) redirect("/dashboard");
+  if (!isOwner && profile?.can_access_inventory !== true) redirect("/dashboard");
 
-  // Key 2: If the user is a staff member WITHOUT explicit Inventory clearance, kick them out.
-  if (!isOwner && profile?.can_access_inventory !== true) {
-    redirect("/dashboard");
-  }
-  // ============================================================================
-
-  // ============================================================================
-  // THE FORM QUERY (THE FIX: Added unit_cost to the select statement)
-  // ============================================================================
   const { data: formItems } = await supabase
     .from("items")
     .select("id, name, type, quantity_on_hand, unit_of_measure, unit_cost")
     .eq("business_id", businessId)
     .eq("is_archived", false);
 
-  // ============================================================================
-  // THE TABLE QUERY (Paginated)
-  // ============================================================================
   let query = supabase
     .from("items")
     .select("*", { count: 'exact' })
@@ -101,21 +80,23 @@ export default async function InventoryPage(props: {
     return new Intl.NumberFormat('en-PH', { style: 'currency', currency }).format(amount);
   };
 
+  // THE FIX: Extract Raw Materials so we can pass them to the Edit Modals
+  const rawMaterials = items?.filter(i => i.type === 'RAW_MATERIAL') || [];
+
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 w-full min-w-0 overflow-x-hidden pb-12">
       
-      {/* HEADER SECTION */}
       <div className="w-full min-w-0">
         <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">Inventory Catalog</h2>
         <p className="text-sm sm:text-base text-neutral-500 mt-1">Manage sellable products, internal supplies, recipes, and manual stock movements.</p>
       </div>
 
-      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm">
+      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 md:p-5 shadow-sm w-full min-w-0">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-blue-100 text-blue-600 rounded-md shrink-0 mt-0.5 shadow-sm">
             <Info size={16} />
           </div>
-          <div className="w-full">
+          <div className="w-full min-w-0">
             <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-2.5">Quick Guide: How this Ledger works</h3>
             <div className="grid md:grid-cols-2 gap-x-8 gap-y-5">
               
@@ -144,7 +125,6 @@ export default async function InventoryPage(props: {
 
       <div className="grid gap-6 lg:gap-8 lg:grid-cols-3 items-start w-full min-w-0">
         
-        {/* LEFT COLUMN: ACTIONS & FORMS */}
         <div className="space-y-6 lg:col-span-1 lg:sticky lg:top-8 w-full min-w-0">
           
           <Card className="shadow-sm border-neutral-200 w-full min-w-0 bg-white">
@@ -171,21 +151,20 @@ export default async function InventoryPage(props: {
 
         </div>
 
-        {/* RIGHT COLUMN: DATA TABLE WITH SEARCH */}
         <div className="lg:col-span-2 space-y-4 w-full min-w-0">
           
           <Card className="shadow-sm border-neutral-200 bg-white w-full min-w-0">
             <CardContent className="p-4 md:p-5">
-              <form method="GET" className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end w-full">
+              <form method="GET" className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 sm:items-end w-full min-w-0">
                 <input type="hidden" name="page" value="1" />
-                <div className="flex-1 w-full min-w-[200px] space-y-1.5">
+                <div className="flex-1 w-full min-w-0 space-y-1.5">
                   <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Search Catalog</Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
                     <Input name="search" placeholder="Search by item name..." defaultValue={searchStr} className="pl-9 bg-neutral-50 border-neutral-200 focus-visible:ring-neutral-900 w-full" />
                   </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0 shrink-0">
                   <Button type="submit" className="bg-neutral-900 text-white flex-1 sm:flex-none shadow-sm transition-all hover:bg-neutral-800">Search</Button>
                   {searchStr && (
                     <Link href="/inventory" className="flex-1 sm:flex-none">
@@ -197,7 +176,6 @@ export default async function InventoryPage(props: {
             </CardContent>
           </Card>
 
-          {/* INVENTORY LEDGER */}
           <Card className="shadow-sm border-neutral-200 flex flex-col bg-white overflow-hidden w-full min-w-0">
             <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 py-4 shrink-0">
               <CardTitle className="text-lg">Current Stock Levels</CardTitle>
@@ -205,7 +183,7 @@ export default async function InventoryPage(props: {
             </CardHeader>
             
             <CardContent className="p-0 flex-1 w-full overflow-hidden">
-              <div className="w-full overflow-x-auto">
+              <div className="w-full overflow-x-auto min-w-0">
                 <table className="w-full text-left text-sm table-auto">
                   <thead className="bg-white border-b border-neutral-200">
                     <tr>
@@ -227,6 +205,7 @@ export default async function InventoryPage(props: {
                       items.map((item) => {
                         const qty = Number(item.quantity_on_hand);
                         const threshold = Number(item.reorder_threshold);
+                        const isComposite = item.type === 'SELLABLE_COMPOSITE';
                         
                         const isNegative = qty < 0;
                         const isLow = qty <= threshold && qty >= 0;
@@ -262,7 +241,7 @@ export default async function InventoryPage(props: {
                                 {item.type === 'SUPPLY' && <span className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200">Supply</span>}
                                 {item.type === 'SELLABLE_SIMPLE' && <span className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200">Sellable</span>}
                                 {item.type === 'RAW_MATERIAL' && <span className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider bg-orange-50 text-orange-700 border border-orange-200">Raw Mat</span>}
-                                {item.type === 'SELLABLE_COMPOSITE' && <span className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">Menu Item</span>}
+                                {isComposite && <span className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">Menu Item</span>}
                               </div>
                               <p className="text-[10px] sm:text-[11px] text-neutral-400 font-mono">
                                 {item.sku ? `SKU: ${item.sku}` : 'No SKU'} • Unit: <span className="uppercase tracking-widest">{item.unit_of_measure}</span>
@@ -278,10 +257,17 @@ export default async function InventoryPage(props: {
                             </td>
                             
                             <td className="px-4 sm:px-6 py-4 text-right align-middle whitespace-nowrap">
-                              <div className={`font-black text-base sm:text-lg ${isNegative ? 'text-red-600' : isLow ? 'text-amber-600' : 'text-neutral-900'}`}>
+                              <div className={`font-black text-base sm:text-lg leading-none ${isNegative ? 'text-red-600' : isLow ? 'text-amber-600' : 'text-neutral-900'}`}>
                                 {qty.toLocaleString()}
                               </div>
-                              <div className="mt-1.5 md:hidden flex justify-end">
+                              
+                              {qty > 0 && !isComposite && (
+                                <div className="text-[10px] font-bold text-purple-600 mt-1.5 uppercase tracking-wider bg-purple-50 inline-block px-1.5 py-0.5 rounded border border-purple-100/50" title="Total Asset Value in Warehouse">
+                                  Asset: {formatCurrency(qty * Number(item.unit_cost))}
+                                </div>
+                              )}
+
+                              <div className="mt-2 md:hidden flex justify-end">
                                 {statusBadge}
                               </div>
                             </td>
@@ -292,7 +278,8 @@ export default async function InventoryPage(props: {
 
                             <td className="px-4 sm:px-6 py-4 text-right align-middle whitespace-nowrap">
                               <div className="flex justify-end">
-                                <ItemRowActions item={item} />
+                                {/* THE FIX: Passing rawMaterials to the Action component */}
+                                <ItemRowActions item={item} rawMaterials={rawMaterials} />
                               </div>
                             </td>
                           </tr>

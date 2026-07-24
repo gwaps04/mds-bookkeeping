@@ -8,7 +8,7 @@ import { DashboardFilter } from "./DashboardFilter";
 import DashboardHelpButton from "./DashboardHelpButton"; 
 import LowStockWidget from "./LowStockWidget"; 
 import TablePagination from "@/components/TablePagination"; 
-import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, TrendingDown, PackageMinus, Target, Info } from "lucide-react"; 
+import { Wallet, Receipt, CreditCard, Landmark, Banknote, TrendingUp, TrendingDown, PackageMinus, Target, Info, Package } from "lucide-react"; 
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -47,16 +47,27 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     supabase.from("income").select("id, amount, date, description, customers(name), accounts!income_category_id_fkey(type)").eq("business_id", businessId),
     supabase.from("expenses").select("id, amount, date, description, vendors(name), accounts!expenses_category_id_fkey(name)").eq("business_id", businessId),
     supabase.from("invoices").select("total_amount, status, income(amount)").eq("business_id", businessId),
-    supabase.from("stock_movements").select("id, quantity, created_at, items!inner(unit_cost)").eq("business_id", businessId).eq("type", "STOCK_OUT").in("reference_type", ["INVOICE", "RECIPE_DEDUCTION"]),
+    
+    // THE FIX: Fetch unit_cost directly from stock_movements! Do not JOIN the live items table.
+    supabase.from("stock_movements").select("id, quantity, created_at, unit_cost").eq("business_id", businessId).eq("type", "STOCK_OUT").in("reference_type", ["INVOICE", "RECIPE_DEDUCTION"]),
+    
     hasInventoryAccess 
-      ? supabase.from("items").select("id, name, quantity_on_hand, reorder_threshold, unit_of_measure, type").eq("business_id", businessId).eq("is_archived", false) 
+      ? supabase.from("items").select("id, name, quantity_on_hand, reorder_threshold, unit_of_measure, type, unit_cost").eq("business_id", businessId).eq("is_archived", false) 
       : Promise.resolve({ data: [] }),
     supabase.from("refund_requests").select("id, amount, reason, created_at, requested_by").eq("business_id", businessId).eq("status", "pending")
   ]);
 
   let lowStockItems: any[] = [];
+  let totalInventoryValue = 0; 
+
   if (hasInventoryAccess) {
     lowStockItems = (activeItems || []).filter(item => Number(item.quantity_on_hand) <= Number(item.reorder_threshold));
+
+    (activeItems || []).forEach(item => {
+      const qty = Number(item.quantity_on_hand);
+      const cost = Number(item.unit_cost || 0);
+      if (qty > 0) totalInventoryValue += (qty * cost);
+    });
   }
 
   let pendingRefunds: any[] = rawRefunds || [];
@@ -99,12 +110,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     periodLabel = `${monthNames[selectedMonth as number]} ${selectedYear}`;
   }
 
-  // ============================================================================
-  // THE FIX: LOCKING THE NET CASH BALANCE TO "ALL TIME" ONLY
-  // ============================================================================
   let totalCashAllTime = 0; 
   let periodNetCashFlow = 0; 
-  
   let periodRevenue = 0; 
   let periodCogs = 0; 
   let periodExpenses = 0; 
@@ -115,16 +122,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   
   const recentActivity: any[] = [];
 
-  // PROCESS INCOME (CASH IN)
   (incomeData || []).forEach((inc) => {
     const amt = Number(inc.amount);
     const isEquity = (inc.accounts as any)?.type === 'equity';
-    
-    // HARD LOCK: Always sum all cash regardless of filter
     totalCashAllTime += amt; 
-    
     if (isInPeriod(inc.date)) {
-      periodNetCashFlow += amt; // Add cash that came in THIS MONTH to the flow badge
+      periodNetCashFlow += amt; 
       periodTransactions++;
       recentActivity.push({ id: inc.id, type: isEquity ? "equity" : "income", amount: amt, date: inc.date, party: (inc.customers as any)?.name || (isEquity ? "Business Owner" : "Walk-in Customer"), description: inc.description || (isEquity ? "Capital Injection" : "Cash Receipt") });
       if (!isEquity) periodRevenue += amt; 
@@ -134,19 +137,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // PROCESS INVENTORY (COGS)
   (cogsData || []).forEach((mov) => {
     if (isInPeriod(mov.created_at)) {
-      periodCogs += (Number(mov.quantity) * Number((mov.items as any)?.unit_cost || 0));
+      // THE FIX: Calculate Cost using the snapshot unit_cost stored directly on the movement row
+      periodCogs += (Number(mov.quantity) * Number(mov.unit_cost || 0));
     }
   });
 
-  // PROCESS EXPENSES (CASH OUT)
   (expenseData || []).forEach((exp) => {
     const amt = Number(exp.amount);
-    
-    // HARD LOCK: Always subtract all expenses regardless of filter
     totalCashAllTime -= amt; 
-    
     if (isInPeriod(exp.date)) {
-      periodNetCashFlow -= amt; // Subtract cash that left THIS MONTH from the flow badge
+      periodNetCashFlow -= amt; 
       periodExpenses += amt; 
       periodTransactions++;
       if ((exp.accounts as any)?.name?.toLowerCase().includes("tax")) periodTaxesPaid += amt;
@@ -215,7 +215,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Wallet size={16} /></div>
               </CardHeader>
               <CardContent className="px-4 pb-4">
-                {/* THE FIX: Hard-locked to all-time bank balance */}
                 <div className={`text-3xl font-black tracking-tight break-words leading-none pb-1 ${totalCashAllTime < 0 ? 'text-red-600' : 'text-neutral-900'}`}>
                   {formatCurrency(totalCashAllTime)}
                 </div>
@@ -223,7 +222,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   CURRENT BANK BALANCE (ALL TIME)
                 </p>
 
-                {/* Secondary Indicator: Shows what moved strictly during the filtered month */}
                 <div className={`text-[11px] font-bold mt-3 inline-flex items-center gap-1.5 px-2 py-1 rounded-md shadow-sm border ${periodNetCashFlow >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
                   {periodNetCashFlow >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                   {periodNetCashFlow >= 0 ? '+' : ''}{formatCurrency(periodNetCashFlow)} {isDefaultState ? 'MTD Flow' : 'Flow'}
@@ -251,11 +249,34 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
+        {hasInventoryAccess && (
+          <Link href="/inventory" className="block group">
+            <Card className="shadow-sm border-neutral-200 bg-white hover:border-purple-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
+              <div className="absolute top-0 left-0 w-full h-1 bg-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Inventory Asset Value</CardTitle>
+                <div className="p-1.5 bg-purple-50 text-purple-600 rounded-md shrink-0"><Package size={16} /></div>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <div className="text-3xl font-black text-neutral-900 tracking-tight break-words leading-none pb-1">
+                  {formatCurrency(totalInventoryValue)}
+                </div>
+                <p className="text-[10px] text-purple-700 mt-2 font-bold uppercase tracking-widest bg-purple-50 border border-purple-100 inline-block px-1.5 py-0.5 rounded break-words">
+                  All Stock On Hand
+                </p>
+                <p className="text-[10px] text-neutral-400 mt-1.5 font-medium leading-tight">
+                  (Physical Asset Worth)
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+        )}
+
         <Link href={`/inventory?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-amber-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
             <div className="absolute top-0 left-0 w-full h-1 bg-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
             <CardHeader className="pb-2 pt-4 px-4 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Cost of Goods</CardTitle>
+              <CardTitle className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider">Cost of Goods (Sold)</CardTitle>
               <div className="p-1.5 bg-amber-50 text-amber-600 rounded-md shrink-0"><PackageMinus size={16} /></div>
             </CardHeader>
             <CardContent className="px-4 pb-4">
@@ -305,7 +326,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </Card>
         </Link>
 
-        {/* THE FIX: THE CLARIFIED NET INCOME CARD */}
         <Link href={`/transactions?month=${selectedMonth}&year=${selectedYear}`} className="block group">
           <Card className="shadow-sm border-neutral-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 h-full relative overflow-hidden flex flex-col justify-between p-1 sm:p-2">
             <div className="absolute top-0 left-0 w-full h-1 bg-teal-500 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -320,7 +340,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               <p className="text-[10px] text-teal-700 mt-2 font-bold uppercase tracking-widest bg-teal-50 border border-teal-100 inline-block px-1.5 py-0.5 rounded break-words">
                 {periodLabel}
               </p>
-              {/* THE FIX: Explicit UI explanation so the business owner knows what this number means */}
               <p className="text-[10px] text-neutral-400 mt-1.5 font-medium leading-tight">
                 (Revenue - Cost of Goods - Expenses)
               </p>
