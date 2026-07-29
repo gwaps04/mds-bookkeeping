@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGr
 import SubmitButton from "@/components/SubmitButton";
 import { Edit2, Trash2, X, History, Loader2, ArrowDownRight, ArrowUpRight, MinusCircle, Undo2, PackagePlus } from "lucide-react";
 
-// THE FIX: Accept rawMaterials as a prop
 export default function ItemRowActions({ item, rawMaterials }: { item: any, rawMaterials: any[] }) {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [unitOfMeasure, setUnitOfMeasure] = useState(item.unit_of_measure || "pcs");
@@ -19,23 +18,21 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
 
-  // THE FIX: Recipe State for editing Composite items
   const [recipe, setRecipe] = useState<any[]>([]);
   const [isLoadingRecipe, setIsLoadingRecipe] = useState(false);
 
   const isNonSellable = item.type === 'SUPPLY' || item.type === 'RAW_MATERIAL';
   const isComposite = item.type === 'SELLABLE_COMPOSITE';
 
+  const safeUnitCost = Number(item.unit_cost || 0).toFixed(2);
   const safeSellingPrice = isNonSellable ? "0.00" : Number(item.selling_price || 0).toFixed(2);
 
-  // THE FIX: Logic to handle opening the Edit Modal and dynamically fetching the old recipe
   const handleOpenEdit = async () => {
     setIsEditOpen(true);
     if (isComposite) {
       setIsLoadingRecipe(true);
       try {
         const fetchedRecipe = await getRecipe(item.id);
-        // Enrich the recipe with current unit_costs from rawMaterials so COGS calculates correctly in the UI
         const enrichedRecipe = fetchedRecipe.map((ing: any) => {
           const rm = rawMaterials.find(r => r.id === ing.raw_material_item_id);
           return { ...ing, unit_cost: rm?.unit_cost || 0 };
@@ -49,7 +46,6 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
     }
   };
 
-  // Recipe Builder Functions
   const addIngredient = () => setRecipe([...recipe, { raw_material_item_id: "", quantity_required: 1, unit_cost: 0 }]);
   const removeIngredient = (index: number) => setRecipe(recipe.filter((_, i) => i !== index));
   const updateIngredient = (index: number, field: string, value: string) => {
@@ -98,6 +94,14 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
     }
   };
 
+  // THE FIX: Aggregating the historical metadata to show the business owner the numbers!
+  const totalConsumed = historyData.filter(l => l.reference_type === 'MANUAL_CONSUMED').reduce((sum, l) => sum + Number(l.quantity), 0);
+  const totalDamaged = historyData.filter(l => l.reference_type === 'MANUAL_DAMAGED').reduce((sum, l) => sum + Number(l.quantity), 0);
+  const totalMissing = historyData.filter(l => l.reference_type === 'MANUAL_MISSING').reduce((sum, l) => sum + Number(l.quantity), 0);
+  const totalReturned = historyData.filter(l => l.reference_type === 'MANUAL_RETURNED').reduce((sum, l) => sum + Number(l.quantity), 0);
+
+  const hasOutages = totalDamaged > 0 || totalMissing > 0 || totalConsumed > 0 || totalReturned > 0;
+
   return (
     <div className="flex items-center justify-end gap-2">
       
@@ -105,7 +109,6 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
         <History size={14} />
       </Button>
 
-      {/* THE FIX: Use handleOpenEdit to trigger the fetch */}
       <Button variant="outline" size="sm" onClick={handleOpenEdit} className="h-8 w-8 p-0 text-blue-600 border-blue-200 hover:bg-blue-50 shadow-sm transition-colors shrink-0" title="Edit Item">
         <Edit2 size={14} />
       </Button>
@@ -131,6 +134,36 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
               <button type="button" onClick={() => setIsHistoryOpen(false)} className="p-1.5 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 rounded-md transition-colors shrink-0"><X size={20}/></button>
             </div>
             
+            {/* THE FIX: Injecting the visual aggregation strip */}
+            {!isLoadingHistory && hasOutages && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 p-4 sm:p-5 bg-neutral-50/80 border-b border-neutral-100 shrink-0">
+                {totalConsumed > 0 && (
+                  <div className="bg-white p-2.5 rounded-lg border border-purple-100 shadow-sm flex flex-col items-center sm:items-start text-center sm:text-left">
+                    <p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-1">Consumed</p>
+                    <p className="text-xl font-black text-neutral-900 leading-none">{totalConsumed}</p>
+                  </div>
+                )}
+                {totalDamaged > 0 && (
+                  <div className="bg-white p-2.5 rounded-lg border border-rose-100 shadow-sm flex flex-col items-center sm:items-start text-center sm:text-left">
+                    <p className="text-[10px] font-bold text-rose-600 uppercase tracking-wider mb-1">Damaged</p>
+                    <p className="text-xl font-black text-neutral-900 leading-none">{totalDamaged}</p>
+                  </div>
+                )}
+                {totalMissing > 0 && (
+                  <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm flex flex-col items-center sm:items-start text-center sm:text-left">
+                    <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Missing</p>
+                    <p className="text-xl font-black text-neutral-900 leading-none">{totalMissing}</p>
+                  </div>
+                )}
+                {totalReturned > 0 && (
+                  <div className="bg-white p-2.5 rounded-lg border border-orange-100 shadow-sm flex flex-col items-center sm:items-start text-center sm:text-left">
+                    <p className="text-[10px] font-bold text-orange-600 uppercase tracking-wider mb-1">Returned</p>
+                    <p className="text-xl font-black text-neutral-900 leading-none">{totalReturned}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="p-0 overflow-auto bg-neutral-50/50 flex-1 w-full min-w-0 relative">
               {isLoadingHistory ? (
                 <div className="flex flex-col items-center justify-center py-20 text-neutral-400">
@@ -160,10 +193,19 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
                     <tbody className="divide-y divide-neutral-100 bg-white">
                       {historyData.map((log) => {
                         const isStockIn = log.type === 'STOCK_IN';
-                        const isStockOut = log.type === 'STOCK_OUT';
                         const isSale = log.type === 'SALE';
                         const isReversal = log.reference_type === 'REVERSAL';
                         
+                        // THE FIX: Parse the structured Reason metadata for coloring!
+                        const isManualOut = log.type === 'STOCK_OUT' && log.reference_type?.startsWith('MANUAL');
+                        let outLabel = "Manual Out";
+                        let badgeStyle = "bg-amber-50 text-amber-700 border-amber-200";
+
+                        if (log.reference_type === 'MANUAL_CONSUMED') { outLabel = "Consumed"; badgeStyle = "bg-purple-50 text-purple-700 border-purple-200"; }
+                        else if (log.reference_type === 'MANUAL_DAMAGED') { outLabel = "Damaged"; badgeStyle = "bg-rose-50 text-rose-700 border-rose-200"; }
+                        else if (log.reference_type === 'MANUAL_MISSING') { outLabel = "Missing"; badgeStyle = "bg-slate-50 text-slate-700 border-slate-200"; }
+                        else if (log.reference_type === 'MANUAL_RETURNED') { outLabel = "Returned"; badgeStyle = "bg-orange-50 text-orange-700 border-orange-200"; }
+
                         return (
                           <tr key={log.id} className={`transition-colors group ${isReversal ? 'bg-neutral-50/50 opacity-70' : 'hover:bg-neutral-50'}`}>
                             <td className="px-4 sm:px-5 py-3.5 whitespace-nowrap align-top">
@@ -175,11 +217,13 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
                                  <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-neutral-500 bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded shadow-sm"><Undo2 size={12} className="mr-1 shrink-0"/> Void Entry</span>
                               ) : isStockIn ? (
                                 <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded shadow-sm"><ArrowDownRight size={12} className="mr-1 shrink-0"/> Received</span>
-                              ) : isStockOut ? (
-                                <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded shadow-sm"><MinusCircle size={12} className="mr-1 shrink-0"/> Manual Out</span>
+                              ) : isManualOut ? (
+                                <span className={`inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded shadow-sm border ${badgeStyle}`}><MinusCircle size={12} className="mr-1 shrink-0"/> {outLabel}</span>
                               ) : isSale ? (
                                 <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded shadow-sm"><ArrowUpRight size={12} className="mr-1 shrink-0"/> Sale</span>
-                              ) : null}
+                              ) : (
+                                <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded shadow-sm"><MinusCircle size={12} className="mr-1 shrink-0"/> System Out</span>
+                              )}
                             </td>
                             <td className="px-4 sm:px-5 py-3.5 whitespace-nowrap text-right align-top">
                               <span className={`font-black text-sm sm:text-base ${isStockIn ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -271,7 +315,6 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
                   </div>
                 </div>
 
-                {/* THE FIX: THE DYNAMIC RECIPE EDITOR FOR COMPOSITE ITEMS */}
                 {isComposite && (
                   <div className="p-3 sm:p-4 bg-orange-50/50 border border-orange-100 rounded-lg space-y-4 w-full min-w-0">
                     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -329,7 +372,7 @@ export default function ItemRowActions({ item, rawMaterials }: { item: any, rawM
                         <input type="hidden" name="unit_cost" value={calculatedCOGS} />
                       </div>
                     ) : (
-                      <Input name="unit_cost" type="number" step="0.01" defaultValue={calculatedCOGS.toFixed(2)} className="h-11 font-mono" required />
+                      <Input name="unit_cost" type="number" step="0.01" defaultValue={safeUnitCost} className="h-11 font-mono" required />
                     )}
                   </div>
                   <div className="space-y-1.5">

@@ -14,11 +14,13 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
   const [movementType, setMovementType] = useState("STOCK_IN");
   const [selectedItem, setSelectedItem] = useState("");
   const [currentUnitCost, setCurrentUnitCost] = useState<number | string>("");
+  
+  // THE FIX: New state for tracking the specific Stock Out Reason
+  const [reason, setReason] = useState("CONSUMED");
 
   useEffect(() => {
     if (selectedItem) {
       const item = items.find(i => i.id === selectedItem);
-      // THE FIX: Force exactly 2 decimal places to satisfy HTML5 input step validations
       if (item) setCurrentUnitCost(Number(item.unit_cost || 0).toFixed(2));
     } else {
       setCurrentUnitCost("");
@@ -32,6 +34,7 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
       setMovementType("STOCK_IN");
       setSelectedItem("");
       setCurrentUnitCost("");
+      setReason("CONSUMED"); // Reset to default
     } catch (error: any) {
       alert(error.message);
     }
@@ -45,7 +48,7 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
           <SelectTrigger className="border-blue-200 focus:ring-blue-500"><SelectValue placeholder="Select action..." /></SelectTrigger>
           <SelectContent>
             <SelectItem value="STOCK_IN">Receive Delivery (+ Stock In)</SelectItem>
-            <SelectItem value="STOCK_OUT">Manual Use / Damage (- Stock Out)</SelectItem>
+            <SelectItem value="STOCK_OUT">Remove Stock (- Stock Out)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -66,6 +69,7 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
           <Input name="quantity" type="number" step="0.01" min="0.01" required placeholder="0" className="focus-visible:ring-blue-600 font-bold text-blue-700 bg-blue-50" />
         </div>
 
+        {/* INBOUND: Show W.A.C Costing Field */}
         {movementType === 'STOCK_IN' && (
           <div className="space-y-1.5 animate-in fade-in slide-in-from-right-2 duration-300">
             <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Purchase Price</Label>
@@ -81,6 +85,22 @@ export default function LogStockMovementForm({ items }: { items: any[] }) {
               className="focus-visible:ring-emerald-600 font-mono" 
               title="The price paid per unit for this specific delivery."
             />
+          </div>
+        )}
+
+        {/* THE FIX: OUTBOUND: Show Categorization Dropdown */}
+        {movementType === 'STOCK_OUT' && (
+          <div className="space-y-1.5 animate-in fade-in slide-in-from-right-2 duration-300">
+            <Label className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-500">Reason</Label>
+            <Select name="reason" value={reason} onValueChange={setReason} required>
+              <SelectTrigger className="border-rose-200 focus:ring-rose-500"><SelectValue placeholder="Select reason..." /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CONSUMED">Internal Use</SelectItem>
+                <SelectItem value="DAMAGED">Damaged / Spoiled</SelectItem>
+                <SelectItem value="MISSING">Missing / Lost</SelectItem>
+                <SelectItem value="RETURNED">Return to Supplier</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>

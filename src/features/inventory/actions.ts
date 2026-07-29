@@ -94,7 +94,7 @@ export async function createItem(formData: FormData) {
 }
 
 // ============================================================================
-// 2. RECORD STOCK MOVEMENT (The Ledger) WITH W.A.C. COSTING ENGINE
+// 2. RECORD STOCK MOVEMENT (WITH W.A.C. COSTING & REASON TRACKING)
 // ============================================================================
 export async function recordStockMovement(formData: FormData) {
   const supabase = await createClient();
@@ -109,6 +109,7 @@ export async function recordStockMovement(formData: FormData) {
   const notes = formData.get("notes") as string;
   
   const inputtedCost = formData.get("unit_cost") ? parseFloat(formData.get("unit_cost") as string) : null;
+  const reason = formData.get("reason") as string; // <--- Extracted the new Reason parameter
 
   if (quantity <= 0) throw new Error("Quantity must be greater than zero.");
 
@@ -119,6 +120,7 @@ export async function recordStockMovement(formData: FormData) {
 
   let snapshotCost = currentCost;
 
+  // The Weighted Average Cost (WAC) Engine
   if (type === 'STOCK_IN' && inputtedCost !== null && inputtedCost >= 0) {
     snapshotCost = inputtedCost;
 
@@ -133,6 +135,12 @@ export async function recordStockMovement(formData: FormData) {
     }
   }
 
+  // The Reason Metadata Tracker
+  let referenceType = 'MANUAL';
+  if (type === 'STOCK_OUT' && reason) {
+    referenceType = `MANUAL_${reason}`; // Injects MANUAL_DAMAGED, MANUAL_MISSING, etc.
+  }
+
   const { error } = await supabase.from("stock_movements").insert({
     business_id: businessId,
     item_id: itemId,
@@ -141,7 +149,7 @@ export async function recordStockMovement(formData: FormData) {
     unit_cost: snapshotCost, 
     notes,
     created_by: user.id,
-    reference_type: 'MANUAL'
+    reference_type: referenceType, // Saved securely to the database
   });
 
   if (error) throw new Error(error.message);
@@ -160,7 +168,7 @@ export async function updateItem(formData: FormData) {
   const businessId = await verifyInventoryAccess(supabase, user.id);
   
   const id = formData.get("id") as string;
-  const type = formData.get("type") as string; // We need the type to know if we are editing a recipe
+  const type = formData.get("type") as string; 
   const name = formData.get("name") as string;
   const sku = formData.get("sku") as string;
   const unitOfMeasure = formData.get("unit_of_measure") as string;
@@ -168,14 +176,12 @@ export async function updateItem(formData: FormData) {
   const newSellingPrice = parseFloat(formData.get("selling_price") as string) || 0;
   const reorderThreshold = parseFloat(formData.get("reorder_threshold") as string) || 0;
   
-  // THE FIX: Intercept Recipe Changes
   const recipeJson = formData.get("recipe") as string;
   let recipeData: any[] = [];
   
   if (type === 'SELLABLE_COMPOSITE' && recipeJson) {
      recipeData = JSON.parse(recipeJson);
      if (recipeData.length === 0) throw new Error("Composite items must have at least one ingredient.");
-     // Recalculate the cost strictly on the backend to prevent frontend manipulation
      newUnitCost = recipeData.reduce((sum, ing) => sum + (Number(ing.quantity_required) * Number(ing.unit_cost)), 0);
   }
 
@@ -193,12 +199,9 @@ export async function updateItem(formData: FormData) {
 
   if (error) throw new Error(error.message);
 
-  // THE FIX: Rewrite the Recipe Ingredients safely
   if (type === 'SELLABLE_COMPOSITE' && recipeData.length > 0) {
-    // 1. Delete the old recipe configuration
     await supabase.from("recipe_ingredients").delete().eq("composite_item_id", id).eq("business_id", businessId);
     
-    // 2. Insert the new updated recipe
     const formattedRecipe = recipeData.map(ing => ({
        business_id: businessId,
        composite_item_id: id,
