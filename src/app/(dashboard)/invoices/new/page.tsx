@@ -1,26 +1,24 @@
-// src/app/(dashboard)/invoices/new/page.tsx
+// FILE: src/app/(dashboard)/invoices/new/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import InvoiceForm from "./InvoiceForm";
 import Link from "next/link";
-
-// The SaaS Engine and the Redirect utility
 import { getTenantAccessLevel } from "@/lib/subscription";
 import { redirect } from "next/navigation";
 
-export default async function NewInvoicePage() {
+export default async function NewInvoicePage(props: {
+  // WOZ FIX: Next.js 15+ requires searchParams to be awaited as a Promise
+  searchParams: Promise<{ clientName?: string; amount?: string; desc?: string }>;
+}) {
+  const searchParams = await props.searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Get Business ID
   const { data: profile } = await supabase
     .from("profiles")
     .select("business_id")
     .eq("id", user?.id)
     .single();
 
-  // ============================================================================
-  // SUBSCRIPTION ROUTE GUARD
-  // ============================================================================
   const { data: business } = await supabase
     .from("businesses")
     .select("subscription_status, subscription_tier, trial_ends_at")
@@ -29,22 +27,15 @@ export default async function NewInvoicePage() {
 
   const accessState = getTenantAccessLevel(business);
   if (accessState.isLocked) {
-    // If they type the URL manually to bypass the disabled button, 
-    // kick them back to the ledger where the red banner will remind them to subscribe!
     redirect("/invoices"); 
   }
-  // ============================================================================
 
-  // Fetch past customers to auto-populate the client dropdown!
   const { data: customers } = await supabase
     .from("customers")
     .select("id, name")
     .eq("business_id", profile?.business_id)
     .order("name");
 
-  // ============================================================================
-  // THE FIX: Explicitly select type, quantity_on_hand, and reorder_threshold
-  // ============================================================================
   const { data: inventoryItems } = await supabase
     .from("items")
     .select("id, name, type, selling_price, quantity_on_hand, reorder_threshold") 
@@ -64,8 +55,14 @@ export default async function NewInvoicePage() {
         </div>
       </div>
 
-      {/* Pass BOTH customers and the FULLY HYDRATED inventory items to the form */}
-      <InvoiceForm customers={customers || []} inventoryItems={inventoryItems || []} />
+      {/* WOZ UPGRADE: Passing the URL Parameters down as initial state props */}
+      <InvoiceForm 
+        customers={customers || []} 
+        inventoryItems={inventoryItems || []} 
+        initialClientName={searchParams?.clientName}
+        initialAmount={searchParams?.amount}
+        initialDesc={searchParams?.desc}
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-// src/app/(dashboard)/invoices/new/InvoiceForm.tsx
+// FILE: src/app/(dashboard)/invoices/new/InvoiceForm.tsx
 "use client";
 
 import { useState } from "react";
@@ -9,8 +9,30 @@ import { Label } from "@/components/ui/label";
 import SubmitButton from "@/components/SubmitButton";
 import { Trash2, Plus, Lock, AlertTriangle, AlertCircle } from "lucide-react";
 
-export default function InvoiceForm({ customers, inventoryItems }: { customers: any[], inventoryItems: any[] }) {
-  const [items, setItems] = useState([{ item_id: "", description: "", quantity: 1, unit_price: 0 }]);
+interface InvoiceFormProps {
+  customers: any[];
+  inventoryItems: any[];
+  initialClientName?: string;
+  initialAmount?: string;
+  initialDesc?: string;
+}
+
+export default function InvoiceForm({ 
+  customers, 
+  inventoryItems, 
+  initialClientName, 
+  initialAmount, 
+  initialDesc 
+}: InvoiceFormProps) {
+  
+  // WOZ UPGRADE: Hydrate the initial state if CRM webhook data is present in the URL
+  const [clientName, setClientName] = useState(initialClientName || "");
+  const [items, setItems] = useState([{ 
+    item_id: "", 
+    description: initialDesc || "", 
+    quantity: 1, 
+    unit_price: initialAmount ? Number(initialAmount) : 0 
+  }]);
 
   const addItem = () => setItems([...items, { item_id: "", description: "", quantity: 1, unit_price: 0 }]);
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
@@ -33,9 +55,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
     setItems(newItems);
   };
 
-  // ============================================================================
-  // THE CLIENT-SIDE ACTION WRAPPER (GUARANTEED INTERCEPTION)
-  // ============================================================================
   const clientAction = (formData: FormData) => {
     let hasEmptyStock = false;
     let hasLowStock = false;
@@ -44,7 +63,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
       const dbItem = inventoryItems.find(i => i.id === cartItem.item_id);
       if (!dbItem || dbItem.type === 'SELLABLE_COMPOSITE') return;
 
-      // Safe Number parsing to prevent NaN breaks
       const currentStock = Number(dbItem.quantity_on_hand || 0);
       const orderQty = Number(cartItem.quantity || 0);
       const threshold = Number(dbItem.reorder_threshold || 0);
@@ -71,12 +89,19 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
 
   return (
     <form action={clientAction} className="space-y-8 w-full min-w-0">
-      
-      {/* HEADER SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-white p-6 rounded-xl border border-neutral-200 shadow-sm w-full min-w-0">
         <div className="space-y-2.5 w-full min-w-0">
           <Label htmlFor="client_name" className="text-xs font-bold text-neutral-600 uppercase tracking-wider">B2B Client / Customer Name</Label>
-          <Input id="client_name" name="client_name" list="clients-list" placeholder="e.g. Acme Corp" className="h-11 w-full" required />
+          <Input 
+            id="client_name" 
+            name="client_name" 
+            list="clients-list" 
+            placeholder="e.g. Acme Corp" 
+            className="h-11 w-full" 
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+            required 
+          />
           <datalist id="clients-list">{customers?.map(c => <option key={c.id} value={c.name} />)}</datalist>
         </div>
         
@@ -86,7 +111,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
         </div>
       </div>
 
-      {/* LINE ITEMS SECTION */}
       <div className="bg-white p-4 md:p-6 rounded-xl border border-neutral-200 shadow-sm space-y-4 w-full min-w-0 overflow-x-hidden">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-bold text-neutral-900 tracking-tight">Line Items</h3>
@@ -133,8 +157,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                       stockStatus === 'LOW' ? 'bg-amber-50/50 border-amber-200 lg:border-amber-200' : 
                       'bg-neutral-50/70 lg:bg-transparent border-neutral-200 lg:border-transparent hover:bg-neutral-50'}`}
                 >
-                  
-                  {/* 1. Catalog Dropdown */}
                   <div className="space-y-2 col-span-1 sm:col-span-2 lg:col-span-1 w-full min-w-0">
                     <Label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider lg:hidden">Catalog Item</Label>
                     <div className="relative">
@@ -146,7 +168,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                         <option value="" className="text-neutral-400">-- Custom Service / Item --</option>
                         {inventoryItems?.map(invItem => {
                            const isMenu = invItem.type === 'SELLABLE_COMPOSITE';
-                           // Better formatting to handle zero or composite items
                            const stockLabel = isMenu ? '(Made-to-order)' : `(Stock: ${Number(invItem.quantity_on_hand || 0)})`;
                            return (
                              <option key={invItem.id} value={invItem.id}>{invItem.name} {stockLabel}</option>
@@ -159,7 +180,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                     </div>
                   </div>
 
-                  {/* 2. Description Input & RESPONSIVE INLINE WARNINGS */}
                   <div className="space-y-2 col-span-1 sm:col-span-2 lg:col-span-1 relative w-full min-w-0 flex flex-col justify-start">
                     <Label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider lg:hidden">Description</Label>
                     <div className="relative w-full">
@@ -173,8 +193,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                       />
                       {isLocked && <Lock size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400" />}
                     </div>
-                    
-                    {/* STANDARD DOCUMENT FLOW FOR FLUID LAYOUT */}
                     {stockStatus === 'EMPTY' && (
                       <div className="text-[10px] sm:text-xs font-bold text-red-600 flex items-start gap-1.5 mt-2 leading-tight animate-in slide-in-from-top-1 fade-in">
                         <AlertCircle size={14} className="shrink-0 mt-0.5" />
@@ -189,7 +207,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                     )}
                   </div>
 
-                  {/* 3. Quantity */}
                   <div className="space-y-2 w-full min-w-0">
                     <Label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider lg:hidden">Qty</Label>
                     <Input 
@@ -202,7 +219,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                     />
                   </div>
 
-                  {/* 4. Unit Price */}
                   <div className="space-y-2 relative w-full min-w-0">
                     <Label className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider lg:hidden">Price (₱)</Label>
                     <Input 
@@ -217,7 +233,6 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                     />
                   </div>
 
-                  {/* 5. Delete Action */}
                   <div className="pt-2 lg:pt-0 flex justify-end lg:justify-center sm:col-span-2 lg:col-span-1 pb-4 lg:pb-0 w-full shrink-0">
                     <Button 
                       type="button" 
@@ -230,14 +245,12 @@ export default function InvoiceForm({ customers, inventoryItems }: { customers: 
                       <Trash2 size={18} />
                     </Button>
                   </div>
-
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* TOTAL DUE FOOTER */}
         <div className="flex justify-end pt-8 pb-2 border-t border-neutral-200 mt-8 w-full">
           <div className="text-right">
             <p className="text-xs text-neutral-500 uppercase tracking-widest font-bold mb-1">Total Due</p>

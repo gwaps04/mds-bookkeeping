@@ -1,4 +1,4 @@
-// src/app/(dashboard)/invoices/page.tsx
+// FILE: src/app/(dashboard)/invoices/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { deleteOfficialInvoice } from "@/features/invoices/actions";
 import Link from "next/link";
@@ -6,13 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ConfirmDeleteForm from "@/components/ConfirmDeleteForm";
-import { Lock, Plus, FileText } from "lucide-react"; 
+import { Lock, Plus, FileText, Inbox } from "lucide-react"; 
 
 import { getTenantAccessLevel } from "@/lib/subscription";
-import { redirect } from "next/navigation";
-
 import TablePagination from "@/components/TablePagination"; 
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +23,13 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
   
   const { data: profile } = await supabase.from("profiles").select("business_id, role").eq("id", user?.id).single();
   const isOwner = profile?.role === 'business_owner' || profile?.role === 'super_admin';
+
+  // --- INTEGRATION INBOX COUNT ---
+  const { count: inboxCount } = await supabase
+    .from("crm_inbox")
+    .select("*", { count: 'exact', head: true })
+    .eq("business_id", profile?.business_id)
+    .eq("status", "PENDING");
 
   // PAGINATION SETUP
   const ITEMS_PER_PAGE = 50;
@@ -88,24 +93,41 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 w-full max-w-full overflow-x-hidden">
       
-      {/* HEADER & NEW BUTTON */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+      {/* HEADER & ACTION BUTTONS */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 w-full">
         <div className="w-full lg:flex-1">
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900 text-balance leading-tight">Invoices</h2>
           <p className="text-sm sm:text-base text-neutral-500 mt-1">Manage and track your accounts receivable.</p>
         </div>
         
-        {isLocked ? (
-          <Button disabled className="w-full md:w-auto bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 h-11 md:h-10 shrink-0">
-            <Lock size={16} /> Creation Locked
-          </Button>
-        ) : (
-          <Link href="/invoices/new" className="w-full md:w-auto shrink-0">
-            <Button className="w-full md:w-auto bg-blue-700 hover:bg-blue-800 text-white shadow-sm font-bold flex items-center justify-center gap-2 transition-all h-11 md:h-10">
-              <Plus size={16} /> Create Invoice
+        <div className="flex items-center gap-3 w-full md:w-auto shrink-0">
+          
+          {/* WOZ FEATURE: THE INTEGRATION INBOX BUTTON */}
+          <Link href="/invoices/inbox" className="relative w-full md:w-auto">
+            <Button variant="outline" className="w-full bg-white text-neutral-700 hover:bg-neutral-50 border-neutral-200 shadow-sm font-bold flex items-center justify-center gap-2 h-11 md:h-10 transition-colors">
+              <Inbox size={16} className="text-blue-600" />
+              <span className="hidden sm:inline">Integration Inbox</span>
+              <span className="sm:hidden">Inbox</span>
             </Button>
+            {inboxCount && inboxCount > 0 ? (
+              <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white shadow-sm ring-2 ring-white">
+                {inboxCount}
+              </span>
+            ) : null}
           </Link>
-        )}
+
+          {isLocked ? (
+            <Button disabled className="w-full md:w-auto bg-neutral-200 text-neutral-500 cursor-not-allowed shadow-none font-medium flex items-center justify-center gap-2 h-11 md:h-10 shrink-0">
+              <Lock size={16} /> Locked
+            </Button>
+          ) : (
+            <Link href="/invoices/new" className="w-full md:w-auto shrink-0">
+              <Button className="w-full md:w-auto bg-blue-700 hover:bg-blue-800 text-white shadow-sm font-bold flex items-center justify-center gap-2 transition-all h-11 md:h-10">
+                <Plus size={16} /> Create
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* SEARCH & FILTER BAR */}
@@ -155,7 +177,6 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
         </CardHeader>
         
         <CardContent className="p-0 flex-1 w-full overflow-x-auto">
-          {/* THE FIX: Replaced min-w-[800px] with table-auto. Added strategic hiding of columns. */}
           <table className="w-full text-left text-sm table-auto">
             <thead className="bg-white border-b border-neutral-200">
               <tr>
@@ -191,16 +212,15 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
                   return (
                     <tr key={inv.id} className={`hover:bg-neutral-50/60 transition-colors group ${inv.displayStatus === 'overdue' ? 'bg-red-50/20' : ''}`}>
                       
-                      {/* 1. INVOICE ID: Hidden on small screens (stacked inside Client) */}
+                      {/* 1. INVOICE ID */}
                       <td className="hidden md:table-cell px-4 sm:px-6 py-4 font-mono text-[11px] text-neutral-500 align-middle whitespace-nowrap">
                         {inv.id.split('-')[0].toUpperCase()}
                       </td>
                       
-                      {/* 2. CLIENT DETAILS & PROGRESSIVE STACKING */}
+                      {/* 2. CLIENT DETAILS */}
                       <td className="px-4 sm:px-6 py-4 whitespace-normal break-words w-full min-w-[150px] align-middle">
                         <p className="font-bold text-neutral-900 text-sm sm:text-base leading-tight">{inv.client_name}</p>
                         
-                        {/* THE MAGIC: Mobile-only visible details (ID hidden on md, Due Date hidden on sm) */}
                         <div className="flex flex-col gap-1 mt-1.5 md:hidden">
                           <span className="font-mono text-[10px] text-neutral-500 font-medium">ID: {inv.id.split('-')[0].toUpperCase()}</span>
                           <span className={`sm:hidden text-[10px] font-medium ${inv.displayStatus === 'overdue' ? 'text-red-600 font-bold' : 'text-neutral-500'}`}>
@@ -209,30 +229,29 @@ export default async function InvoicesPage(props: { searchParams: Promise<{ sear
                         </div>
                       </td>
                       
-                      {/* 3. DUE DATE: Hidden on mobile (stacked inside Client) */}
+                      {/* 3. DUE DATE */}
                       <td className="hidden sm:table-cell px-4 sm:px-6 py-4 align-middle whitespace-nowrap">
                         <span className={`text-xs sm:text-sm font-medium ${inv.displayStatus === 'overdue' ? 'text-red-600 font-bold' : 'text-neutral-600'}`}>
                           {new Date(inv.due_date).toLocaleDateString()}
                         </span>
                       </td>
 
-                      {/* 4. AMOUNT: Always visible, strictly right-aligned */}
+                      {/* 4. AMOUNT */}
                       <td className="px-4 sm:px-6 py-4 text-right align-middle whitespace-nowrap">
                         <div className="font-black text-neutral-900 text-sm sm:text-base">
                           ₱{Number(inv.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </div>
-                        {/* Status Badge specifically for mobile (hidden on sm+) */}
                         <div className="mt-2 sm:hidden flex justify-end">
                           {statusBadge}
                         </div>
                       </td>
 
-                      {/* 5. STATUS: Hidden on mobile (stacked inside Amount) */}
+                      {/* 5. STATUS */}
                       <td className="hidden sm:table-cell px-4 sm:px-6 py-4 text-center align-middle whitespace-nowrap">
                         {statusBadge}
                       </td>
                       
-                      {/* 6. ACTIONS: Always visible, stacks vertically on mobile to preserve touch targets */}
+                      {/* 6. ACTIONS */}
                       <td className="px-4 sm:px-6 py-4 text-center align-middle whitespace-nowrap">
                         <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
                           
