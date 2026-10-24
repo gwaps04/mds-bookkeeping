@@ -1,10 +1,13 @@
-// src/app/(dashboard)/settings/page.tsx
+// FILE: src/app/(dashboard)/settings/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import SubmitButton from "@/components/SubmitButton";
 import { revalidatePath } from "next/cache";
+
+// WOZ FIX: The import was correct, but we needed to actually render it in the UI!
+import ApiKeyManager from '@/components/settings/ApiKeyManager';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -28,7 +31,7 @@ export default async function SettingsPage() {
     const allow_staff_payment_logging = formData.get("allow_staff_payment_logging") === "on";
     const allow_staff_account_creation = formData.get("allow_staff_account_creation") === "on";
     const allow_staff_refund_request = formData.get("allow_staff_refund_request") === "on";
-    const allow_staff_void_request = formData.get("allow_staff_void_request") === "on"; // <-- THE NEW TOGGLE
+    const allow_staff_void_request = formData.get("allow_staff_void_request") === "on"; 
     const tin_number = formData.get("tin_number") as string;
 
     // Dashboard Visibility Configuration
@@ -41,7 +44,7 @@ export default async function SettingsPage() {
       allow_staff_payment_logging,
       allow_staff_account_creation,
       allow_staff_refund_request,
-      allow_staff_void_request, // <-- SAVING TO DB
+      allow_staff_void_request, 
       show_net_cash_to_staff,
       show_taxes_to_staff
     }).eq("id", bId);
@@ -62,6 +65,10 @@ export default async function SettingsPage() {
       </div>
 
       <div className="max-w-2xl space-y-6">
+        
+        {/* WOZ FIX: Injected the API Key Manager Component Right Here! */}
+        <ApiKeyManager />
+
         <form action={saveSettings} className="space-y-6">
           <input type="hidden" name="business_id" value={business?.id || ''} />
 
@@ -111,7 +118,6 @@ export default async function SettingsPage() {
                 </div>
               </div>
 
-              {/* --- NEW MODULE: VOID REQUEST CONTROL --- */}
               <div className="p-4 bg-white border border-neutral-200 rounded-md flex items-start gap-3 hover:border-neutral-300 transition-colors">
                 <input type="checkbox" id="allow_staff_void_request" name="allow_staff_void_request" defaultChecked={business?.allow_staff_void_request ?? true} className="mt-1 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer" />
                 <div>
